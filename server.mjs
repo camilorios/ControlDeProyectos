@@ -21,11 +21,10 @@ function getAzurePgConnString() {
   if (pgTypeVar) return process.env[pgTypeVar];
   const customVar = Object.keys(process.env).find(k => k.startsWith("CUSTOMCONNSTR_"));
   if (customVar) return process.env[customVar];
-  return process.env.DATABASE_URL || null; // opcional: por si decides usar DATABASE_URL
+  return process.env.DATABASE_URL || null; // opcional
 }
 
 function parseAzureConnStrKeyValue(connStr) {
-  // Ejemplo: "Database=db;Server=srv.postgres.database.azure.com;User Id=user;Password=***;Port=5432;Ssl Mode=Require;"
   const pairs = connStr.split(";").map(s => s.trim()).filter(Boolean);
   const map = {};
   for (const p of pairs) {
@@ -84,6 +83,11 @@ if (explicitEnv.host && explicitEnv.database && explicitEnv.user) {
     process.exit(1);
   }
   poolConfig = parseAzureConnStrKeyValue(cs);
+}
+
+// Parche defensivo: si es Azure PG y no se pidió SSL, forzarlo
+if (!poolConfig.ssl && /postgres\.database\.azure\.com$/i.test(poolConfig.host || "")) {
+  poolConfig.ssl = { rejectUnauthorized: false };
 }
 
 console.log("PG config →", {
@@ -266,57 +270,4 @@ app.post("/api/visits", async (req, res) => {
     const id = uuidv4();
     const { producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad } = req.body;
     await pool.query(`
-      INSERT INTO visits (id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);
-    `, [id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad]);
-    res.json({ id });
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: "Error creating visit" });
-  }
-});
-
-app.put("/api/visits/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const fields = ["producto","client_name","numero_oportunidad","pais","consultor","hora","fecha","monto_oportunidad","activo"];
-    const updates = [];
-    const values = [];
-    for (const f of fields) {
-      if (Object.prototype.hasOwnProperty.call(req.body, f)) {
-        values.push(req.body[f]);
-        updates.push(`${f} = $${values.length}`);
-      }
-    }
-    if (updates.length === 0) return res.json({ ok: true });
-    values.push(id);
-    await pool.query(`UPDATE visits SET ${updates.join(", ")} WHERE id = $${values.length};`, values);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: "Error updating visit" });
-  }
-});
-
-app.delete("/api/visits/:id", async (req, res) => {
-  try {
-    await pool.query(`UPDATE visits SET activo = FALSE WHERE id = $1;`, [req.params.id]); // soft delete
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: "Error deleting visit" });
-  }
-});
-
-// -------------------------------------------------------------------
-// 4) Static: servir el build de Vite (SPA)
-// -------------------------------------------------------------------
-app.use(express.static(path.join(__dirname, "dist")));
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
-});
-
-// -------------------------------------------------------------------
-// 5) Arranque
-// -------------------------------------------------------------------
-const port = process.env.PORT || 8080;
-app.listen(port, "0.0.0.0", () => {
-  console.log(`App running on http://localhost:${port}`);
-});
+      INSERT INTO visits (id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad_
