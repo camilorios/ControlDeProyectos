@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 // ----------------------- PG Config -------------------
 function parseAzureConnString(cs) {
-  // Ej: "Database=controlproyectos;Server=projectmn.postgres.database.azure.com;User Id=projectadmin;Password=***"
+  // Ejemplo: "Database=controlproyectos;Server=projectmn.postgres.database.azure.com;User Id=projectadmin;Password=***"
   const parts = Object.fromEntries(
     cs
       .split(";")
@@ -29,7 +29,6 @@ function parseAzureConnString(cs) {
   const user = parts["userid"] || parts.user || parts.username || process.env.PGUSER;
   const password = parts.password || process.env.PGPASSWORD;
   const port = Number(parts.port || process.env.PGPORT || 5432);
-
   return {
     host,
     database,
@@ -41,7 +40,6 @@ function parseAzureConnString(cs) {
 }
 
 function buildPgConfig() {
-  // Utilidad: toma la primera variable cuyo nombre empiece por alguno de los prefijos dados
   const pickFirstByPrefix = (prefixes) => {
     for (const [k, v] of Object.entries(process.env)) {
       if (v && prefixes.some((p) => k.toUpperCase().startsWith(p))) {
@@ -51,12 +49,11 @@ function buildPgConfig() {
     return null;
   };
 
-  // 1) Connection strings del App Service (cualquier nombre)
-  // - CUSTOMCONNSTR_*  (tipo Custom)
-  // - POSTGRESQLCONNSTR_* (tipo PostgreSQL)
+  // 1) Connection strings del App Service
   const csAnyCustom = pickFirstByPrefix(["CUSTOMCONNSTR_"]);
   if (csAnyCustom) {
     const cfg = parseAzureConnString(csAnyCustom.value);
+    cfg._source = csAnyCustom.key;
     console.log(`PG source: ${csAnyCustom.key} (Custom connstring)`);
     return cfg;
   }
@@ -64,11 +61,12 @@ function buildPgConfig() {
   const csAnyPg = pickFirstByPrefix(["POSTGRESQLCONNSTR_"]);
   if (csAnyPg) {
     const cfg = parseAzureConnString(csAnyPg.value);
+    cfg._source = csAnyPg.key;
     console.log(`PG source: ${csAnyPg.key} (PostgreSQL connstring)`);
     return cfg;
   }
 
-  // 2) Variables PGHOST/PGUSER/... (plan B)
+  // 2) Variables sueltas PG*
   const cfgEnv = {
     host: process.env.PGHOST,
     user: process.env.PGUSER,
@@ -76,6 +74,7 @@ function buildPgConfig() {
     database: process.env.PGDATABASE || "controlproyectos",
     port: Number(process.env.PGPORT || 5432),
     ssl: { rejectUnauthorized: false },
+    _source: "PG* env vars",
   };
   console.log(`PG source: individual PG* env vars`);
   return cfgEnv;
@@ -91,71 +90,84 @@ console.log("PG config →", {
 const pool = new Pool(pgConfig);
 
 // ----------------------- Zod Helpers ------------------
-// Coerción numérica compatible (sustituye z.coerce.number para versiones antiguas)
-const zNumCoerce = z
+// Convierte "" -> null para campos string opcionales
+const zStrOpt = z
+  .preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), z.string().nullable())
+  .optional();
+
+// Coerción numérica; "" -> null; " 123 " -> 123
+const zNumNullable = z
   .preprocess((v) => {
-    if (v === null || v === undefined) return v;         // permitir null/undefined
+    if (v === null || v === undefined) return null;
     if (typeof v === "string" && v.trim() === "") return null; // "" -> null
     const n = Number(typeof v === "string" ? v.trim() : v);
-    return Number.isFinite(n) ? n : NaN;                 // NaN para que z.number lo rechace
-  }, z.number({ invalid_type_error: "Debe ser un número" }))
-  .refine((n) => Number.isFinite(n), { message: "Debe ser un número válido" });
+    return Number.isFinite(n) ? n : NaN;
+  }, z.number({ invalid_type_error: "Debe ser un número" }).nullable());
+
+// Coerción numérica requerida (no permite null)
+const zNumRequired = z
+  .preprocess((v) => {
+    if (v === null || v === undefined) return NaN;
+    if (typeof v === "string" && v.trim() === "") return NaN;
+    const n = Number(typeof v === "string" ? v.trim() : v);
+    return Number.isFinite(n) ? n : NaN;
+  }, z.number({ invalid_type_error: "Debe ser un número" }));
+
+// Fecha "YYYY-MM-DD" o null/omitir
+const zDateOpt = z
+  .preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
+    .nullable())
+  .optional();
 
 // ----------------------- Schemas ----------------------
 const ProjectCreate = z.object({
   nombre: z.string().min(1, "nombre es requerido"),
   pais: z.string().min(1, "pais es requerido"),
   consultor: z.string().min(1, "consultor es requerido"),
-  // IMPORTANTE: .refine para >= 0 (compat con versiones antiguas)
-  monto_oportunidad: zNumCoerce.refine((n) => n >= 0, {
+
+  monto_oportunidad: zNumRequired.refine((n) => n >= 0, {
     message: "monto_oportunidad debe ser >= 0",
   }),
 
-  numero_oportunidad: z.string().nullable().optional(),
-  client_name: z.string().nullable().optional(),
-  pm: z.string().nullable().optional(),
+  numero_oportunidad: zStrOpt,   // "" -> null
+  client_name: zStrOpt,          // "" -> null
+  pm: zStrOpt,                   // "" -> null
 
-  planned_hours: zNumCoerce.nullable().optional(),
-  executed_hours: zNumCoerce.nullable().optional(),
-  hourly_rate: zNumCoerce.nullable().optional(),
+  planned_hours: zNumNullable,   // "" -> null
+  executed_hours: zNumNullable,  // "" -> null
+  hourly_rate: zNumNullable,     // "" -> null
 
-  start_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
-    .nullable()
-    .optional(),
-  end_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
-    .nullable()
-    .optional(),
+  start_date: zDateOpt,          // "" -> null
+  end_date: zDateOpt,            // "" -> null
 });
 
 const ProjectUpdate = z.object({
   nombre: z.string().optional(),
   pais: z.string().optional(),
   consultor: z.string().optional(),
-  monto_oportunidad: zNumCoerce.optional(),
-  numero_oportunidad: z.string().nullable().optional(),
-  client_name: z.string().nullable().optional(),
-  pm: z.string().nullable().optional(),
-  planned_hours: zNumCoerce.nullable().optional(),
-  executed_hours: zNumCoerce.nullable().optional(),
-  hourly_rate: zNumCoerce.nullable().optional(),
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  monto_oportunidad: zNumNullable, // permite null
+  numero_oportunidad: zStrOpt,
+  client_name: zStrOpt,
+  pm: zStrOpt,
+  planned_hours: zNumNullable,
+  executed_hours: zNumNullable,
+  hourly_rate: zNumNullable,
+  start_date: zDateOpt,
+  end_date: zDateOpt,
   terminado: z.boolean().optional(),
 });
 
 const VisitCreate = z.object({
-  producto: z.string().nullable().optional(),
-  client_name: z.string().nullable().optional(),
-  numero_oportunidad: z.string().nullable().optional(),
-  pais: z.string().nullable().optional(),
-  consultor: z.string().nullable().optional(),
-  hora: z.string().nullable().optional(),
-  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  monto_oportunidad: zNumCoerce.nullable().optional(),
+  producto: zStrOpt,
+  client_name: zStrOpt,
+  numero_oportunidad: zStrOpt,
+  pais: zStrOpt,
+  consultor: zStrOpt,
+  hora: zStrOpt,
+  fecha: zDateOpt,
+  monto_oportunidad: zNumNullable,
   activo: z.boolean().optional(),
 });
 
@@ -202,8 +214,27 @@ async function ensureTables() {
 const app = express();
 app.use(express.json());
 
-// Health
+// Health simple
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+// Health DB: prueba SELECT 1 y muestra de dónde leyó la cadena
+app.get("/api/health/db", async (_req, res) => {
+  try {
+    const r = await pool.query("SELECT 1 as ok");
+    res.json({
+      ok: true,
+      ping: r.rows[0].ok,
+      source: pgConfig._source || "unknown",
+      host: pgConfig.host,
+      db: pgConfig.database,
+      port: pgConfig.port,
+      ssl: !!pgConfig.ssl,
+    });
+  } catch (e) {
+    console.error("DB health error:", e);
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
 // ---------- Projects ----------
 app.get("/api/projects", async (_req, res) => {
@@ -282,6 +313,7 @@ app.post("/api/projects", async (req, res) => {
     res.status(201).json({ ok: true, project: rows[0] });
   } catch (e) {
     if (e?.name === "ZodError") {
+      console.error("Validation error:", e.issues);
       return res
         .status(400)
         .json({ ok: false, error: "Datos inválidos", details: e.issues });
@@ -336,6 +368,7 @@ app.put("/api/projects/:id", async (req, res) => {
     res.json({ ok: true, project: rows[0] });
   } catch (e) {
     if (e?.name === "ZodError") {
+      console.error("Validation error:", e.issues);
       return res
         .status(400)
         .json({ ok: false, error: "Datos inválidos", details: e.issues });
@@ -410,6 +443,7 @@ app.post("/api/visits", async (req, res) => {
     res.status(201).json({ ok: true, visit: rows[0] });
   } catch (e) {
     if (e?.name === "ZodError") {
+      console.error("Validation error:", e.issues);
       return res
         .status(400)
         .json({ ok: false, error: "Datos inválidos", details: e.issues });
@@ -436,10 +470,7 @@ app.delete("/api/visits/:id", async (req, res) => {
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
-/**
- * Catch-all para SPA compatible con Express 5:
- * Devuelve index.html para cualquier GET que no sea /api/*
- */
+// Catch-all para SPA (no intercepta /api/*)
 app.use((req, res, next) => {
   if (req.method !== "GET") return next();
   if (req.path.startsWith("/api/")) return next();
