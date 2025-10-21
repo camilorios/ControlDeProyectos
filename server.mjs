@@ -416,8 +416,13 @@ app.delete("/api/visits/:id", async (req, res) => {
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
-// Catch-all para SPA (evita error path-to-regexp con /(.*))
-app.get("*", (_req, res) => {
+/**
+ * Catch-all para SPA compatible con Express 5:
+ * Devuelve index.html para cualquier GET que no sea /api/*
+ */
+app.use((req, res, next) => {
+  if (req.method !== "GET") return next();
+  if (req.path.startsWith("/api/")) return next();
   res.sendFile(path.join(distPath, "index.html"));
 });
 
