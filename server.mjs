@@ -41,26 +41,35 @@ function parseAzureConnString(cs) {
 }
 
 function buildPgConfig() {
-  // 1) Connection String del App Service (Azure)
-   const customCs =
-    process.env.CUSTOMCONNSTR_AZURE_POSTGRESQL_CONNECTIONSTRING ||
-    process.env.CUSTOMCONNSTR_POSTGRESQL ||
-    process.env.CUSTOMCONNSTR_DEFAULT;
+  // Utilidad: toma la primera variable cuyo nombre empiece por alguno de los prefijos dados
+  const pickFirstByPrefix = (prefixes) => {
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v && prefixes.some((p) => k.toUpperCase().startsWith(p))) {
+        return { key: k, value: v };
+      }
+    }
+    return null;
+  };
 
-  if (customCs) return parseAzureConnString(customCs);
-  
-   // Ya existentes (por si algún día cambias el tipo):
-  const azureCs =
-    process.env.AZURE_POSTGRESQL_CONNECTIONSTRING ||
-    process.env.POSTGRESQLCONNSTR_AZURE_POSTGRESQL_CONNECTIONSTRING ||
-    process.env.POSTGRESQLCONNSTR_POSTGRESQL ||
-    process.env.POSTGRESQLCONNSTR_DEFAULT;
+  // 1) Connection strings del App Service (cualquier nombre)
+  // - CUSTOMCONNSTR_*  (tipo Custom)
+  // - POSTGRESQLCONNSTR_* (tipo PostgreSQL)
+  const csAnyCustom = pickFirstByPrefix(["CUSTOMCONNSTR_"]);
+  if (csAnyCustom) {
+    const cfg = parseAzureConnString(csAnyCustom.value);
+    console.log(`PG source: ${csAnyCustom.key} (Custom connstring)`);
+    return cfg;
+  }
 
-  if (azureCs) return parseAzureConnString(azureCs);
+  const csAnyPg = pickFirstByPrefix(["POSTGRESQLCONNSTR_"]);
+  if (csAnyPg) {
+    const cfg = parseAzureConnString(csAnyPg.value);
+    console.log(`PG source: ${csAnyPg.key} (PostgreSQL connstring)`);
+    return cfg;
+  }
 
-
-  // 2) Variables PGHOST/PGUSER/...
-  return {
+  // 2) Variables PGHOST/PGUSER/... (plan B)
+  const cfgEnv = {
     host: process.env.PGHOST,
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
@@ -68,6 +77,8 @@ function buildPgConfig() {
     port: Number(process.env.PGPORT || 5432),
     ssl: { rejectUnauthorized: false },
   };
+  console.log(`PG source: individual PG* env vars`);
+  return cfgEnv;
 }
 
 const pgConfig = buildPgConfig();
@@ -95,7 +106,7 @@ const ProjectCreate = z.object({
   nombre: z.string().min(1, "nombre es requerido"),
   pais: z.string().min(1, "pais es requerido"),
   consultor: z.string().min(1, "consultor es requerido"),
-  // IMPORTANTE: no usamos .min(); usamos refine para >= 0
+  // IMPORTANTE: .refine para >= 0 (compat con versiones antiguas)
   monto_oportunidad: zNumCoerce.refine((n) => n >= 0, {
     message: "monto_oportunidad debe ser >= 0",
   }),
