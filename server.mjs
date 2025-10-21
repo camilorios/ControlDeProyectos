@@ -160,13 +160,14 @@ app.post("/api/projects", async (req, res) => {
     const body = ProjectCreate.parse(req.body);
     const id = uuidv4();
 
-    await pool.query(
+    const { rows } = await pool.query(
       `INSERT INTO projects (
         id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
         client_name, pm, planned_hours, executed_hours, hourly_rate, start_date, end_date
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
-      );`,
+      )
+      RETURNING *;`,
       [
         id,
         body.nombre,
@@ -184,7 +185,7 @@ app.post("/api/projects", async (req, res) => {
       ]
     );
 
-    res.status(201).json({ ok: true, id });
+    res.status(201).json({ ok: true, project: rows[0] });
   } catch (e) {
     if (e?.name === "ZodError") {
       return res.status(400).json({ ok: false, error: "Datos inválidos", details: e.issues });
@@ -193,6 +194,7 @@ app.post("/api/projects", async (req, res) => {
     res.status(500).json({ ok: false, error: "Error creando proyecto" });
   }
 });
+
 
 app.put("/api/projects/:id", async (req, res) => {
   try {
@@ -220,6 +222,31 @@ app.post("/api/projects/:id/observations", async (req, res) => {
       [obsId, req.params.id, req.body.texto ?? ""]);
     res.json({ id: obsId });
   } catch (e) { console.error(e); res.status(500).json({ error: "Error adding observation" }); }
+});
+
+app.get("/api/projects/:id", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.*,
+        COALESCE((
+          SELECT json_agg(
+            json_build_object('id', o.id, 'texto', o.texto, 'fecha', o.fecha)
+            ORDER BY o.fecha DESC
+          )
+          FROM project_observations o
+          WHERE o.project_id = p.id
+        ), '[]') AS observaciones
+       FROM projects p
+       WHERE p.id = $1
+       LIMIT 1;`,
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: "No encontrado" });
+    res.json({ ok: true, project: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error leyendo proyecto" });
+  }
 });
 
 app.delete("/api/projects/:id/observations/:obsId", async (req, res) => {
