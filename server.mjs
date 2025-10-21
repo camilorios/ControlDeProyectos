@@ -1,89 +1,152 @@
-// server.mjs — API + Static + Azure PostgreSQL (Express 5 + ESM)
+// server.mjs
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Pool } from "pg";
-import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
+import { v4 as uuidv4 } from "uuid";
 
+// ----------------------- Util paths -----------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-app.use(express.json());
+// ----------------------- PG Pool --------------------------
+function parseAzureConnString(cs) {
+  // Ej: "Database=controlproyectos;Server=projectmn.postgres.database.azure.com;User Id=projectadmin;Password=***"
+  const parts = Object.fromEntries(
+    cs
+      .split(";")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => {
+        const i = p.indexOf("=");
+        if (i === -1) return [p, ""];
+        return [p.slice(0, i).toLowerCase().replace(/\s+/g, ""), p.slice(i + 1)];
+      })
+  );
+  const host = (parts.server || parts.host || "").replace(/^tcp:/i, "");
+  const database = parts.database || parts.db || process.env.PGDATABASE || "postgres";
+  const user = parts["userid"] || parts.user || parts.username || process.env.PGUSER;
+  const password = parts.password || process.env.PGPASSWORD;
+  const port = Number(parts.port || process.env.PGPORT || 5432);
 
-// ---------------- Connection String de Azure ----------------
-function getAzurePgConnString() {
-  const pgTypeVar = Object.keys(process.env).find(k => k.startsWith("POSTGRESQLCONNSTR_"));
-  if (pgTypeVar) return process.env[pgTypeVar];
-  const customVar = Object.keys(process.env).find(k => k.startsWith("CUSTOMCONNSTR_"));
-  if (customVar) return process.env[customVar];
-  return process.env.DATABASE_URL || null;
-}
-
-function parseAzureConnStrKeyValue(connStr) {
-  const pairs = connStr.split(";").map(s => s.trim()).filter(Boolean);
-  const map = {};
-  for (const p of pairs) {
-    const i = p.indexOf("=");
-    if (i > 0) map[p.slice(0, i).trim()] = p.slice(i + 1).trim();
-  }
-  let host = map["Server"] || map["Host"] || "";
-  let port = Number(map["Port"] || 5432);
-  if (host.includes(":")) { const [h, p] = host.split(":"); host = h; if (p) port = Number(p); }
-  const user = map["User Id"] || map["UserID"] || map["User"];
-  const sslRequired = String(map["Ssl Mode"] || map["SSL Mode"] || map["SSL"] || "")
-    .toLowerCase().includes("require");
   return {
-    host, port,
-    database: map["Database"] || map["DB"] || map["Initial Catalog"],
-    user, password: map["Password"],
-    ssl: sslRequired ? { rejectUnauthorized: false } : false,
+    host,
+    database,
+    user,
+    password,
+    port,
+    ssl: { rejectUnauthorized: false },
   };
 }
 
-const explicitEnv = {
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT ? Number(process.env.DB_PORT) : undefined,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: process.env.DB_SSL ? { rejectUnauthorized: false } : undefined,
-};
+function buildPgConfig() {
+  // 1) Cadena típica de Azure configurada como "Connection string" del App Service
+  const azureCs =
+    process.env.AZURE_POSTGRESQL_CONNECTIONSTRING ||
+    process.env.POSTGRESQLCONNSTR_AZURE_POSTGRESQL_CONNECTIONSTRING ||
+    process.env.POSTGRESQLCONNSTR_POSTGRESQL ||
+    process.env.POSTGRESQLCONNSTR_DEFAULT;
 
-let poolConfig;
-if (explicitEnv.host && explicitEnv.database && explicitEnv.user) {
-  poolConfig = {
-    host: explicitEnv.host,
-    port: explicitEnv.port || 5432,
-    database: explicitEnv.database,
-    user: explicitEnv.user,
-    password: explicitEnv.password,
-    ssl: explicitEnv.ssl ?? { rejectUnauthorized: false },
+  if (azureCs) return parseAzureConnString(azureCs);
+
+  // 2) Variables sueltas tipo PGHOST/PGUSER/...
+  return {
+    host: process.env.PGHOST,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    database: process.env.PGDATABASE || "controlproyectos",
+    port: Number(process.env.PGPORT || 5432),
+    ssl: { rejectUnauthorized: false },
   };
-} else {
-  const cs = getAzurePgConnString();
-  if (!cs) { console.error("No DB env vars and no App Service Connection String found"); process.exit(1); }
-  poolConfig = parseAzureConnStrKeyValue(cs);
 }
-// Forzar SSL si es Azure PG aunque la cadena no lo traiga
-if (!poolConfig.ssl && /postgres\.database\.azure\.com$/i.test(poolConfig.host || "")) {
-  poolConfig.ssl = { rejectUnauthorized: false };
-}
-console.log("PG config →", { host: poolConfig.host, port: poolConfig.port, database: poolConfig.database, ssl: !!poolConfig.ssl });
-const pool = new Pool(poolConfig);
 
-// ---------------- Esquema mínimo ----------------
+const pgConfig = buildPgConfig();
+console.log("PG config →", {
+  host: pgConfig.host,
+  port: pgConfig.port,
+  database: pgConfig.database,
+  ssl: !!pgConfig.ssl,
+});
+const pool = new Pool(pgConfig);
+
+// ----------------------- Zod Schemas ----------------------
+/** Coerción numérica robusta: acepta "1200" o 1200, rechaza NaN */
+const zNumCoerce = z.coerce
+  .number({ invalid_type_error: "Debe ser un número" })
+  .refine((n) => Number.isFinite(n), { message: "Debe ser un número válido" });
+
+const ProjectCreate = z.object({
+  // obligatorios
+  nombre: z.string().min(1, "nombre es requerido"),
+  pais: z.string().min(1, "pais es requerido"),
+  consultor: z.string().min(1, "consultor es requerido"),
+  monto_oportunidad: zNumCoerce.min(0, "monto_oportunidad debe ser >= 0"),
+
+  // opcionales
+  numero_oportunidad: z.string().nullable().optional(),
+  client_name: z.string().nullable().optional(),
+  pm: z.string().nullable().optional(),
+
+  planned_hours: zNumCoerce.nullable().optional(),
+  executed_hours: zNumCoerce.nullable().optional(),
+  hourly_rate: zNumCoerce.nullable().optional(),
+
+  // fechas como "YYYY-MM-DD" o null
+  start_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
+    .nullable()
+    .optional(),
+  end_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
+    .nullable()
+    .optional(),
+});
+
+const ProjectUpdate = z.object({
+  nombre: z.string().optional(),
+  pais: z.string().optional(),
+  consultor: z.string().optional(),
+  monto_oportunidad: zNumCoerce.optional(),
+  numero_oportunidad: z.string().nullable().optional(),
+  client_name: z.string().nullable().optional(),
+  pm: z.string().nullable().optional(),
+  planned_hours: zNumCoerce.nullable().optional(),
+  executed_hours: zNumCoerce.nullable().optional(),
+  hourly_rate: zNumCoerce.nullable().optional(),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  terminado: z.boolean().optional(),
+});
+
+const VisitCreate = z.object({
+  producto: z.string().nullable().optional(),
+  client_name: z.string().nullable().optional(),
+  numero_oportunidad: z.string().nullable().optional(),
+  pais: z.string().nullable().optional(),
+  consultor: z.string().nullable().optional(),
+  hora: z.string().nullable().optional(),
+  fecha: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  monto_oportunidad: zNumCoerce.nullable().optional(),
+  activo: z.boolean().optional(),
+});
+
+// ----------------------- Ensure Tables --------------------
 async function ensureTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
+      id UUID PRIMARY KEY,
       nombre TEXT NOT NULL,
       numero_oportunidad TEXT,
       pais TEXT NOT NULL,
       consultor TEXT NOT NULL,
-      monto_oportunidad NUMERIC NOT NULL,
-      terminado BOOLEAN DEFAULT FALSE,
+      monto_oportunidad NUMERIC NOT NULL DEFAULT 0,
       client_name TEXT,
       pm TEXT,
       planned_hours NUMERIC,
@@ -91,18 +154,14 @@ async function ensureTables() {
       hourly_rate NUMERIC,
       start_date DATE,
       end_date DATE,
-      fecha_creacion TIMESTAMP DEFAULT NOW()
-    );`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS project_observations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      texto TEXT,
-      fecha TIMESTAMP DEFAULT NOW()
-    );`);
+      terminado BOOLEAN NOT NULL DEFAULT false,
+      fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS visits (
-      id TEXT PRIMARY KEY,
+      id UUID PRIMARY KEY,
       producto TEXT,
       client_name TEXT,
       numero_oportunidad TEXT,
@@ -111,197 +170,266 @@ async function ensureTables() {
       hora TEXT,
       fecha DATE,
       monto_oportunidad NUMERIC,
-      activo BOOLEAN DEFAULT TRUE,
-      fecha_creacion TIMESTAMP DEFAULT NOW()
-    );`);
-}
-await ensureTables();
-
-// ---------------- API ----------------
-app.get("/api/health/db", async (_req, res) => {
-  try { const r = await pool.query("SELECT NOW() as now"); res.json({ ok: true, now: r.rows[0].now }); }
-  catch (e) { console.error("DB health error:", e); res.status(500).json({ ok: false, error: String(e?.message || e) }); }
-});
-
-// Projects
-app.get("/api/projects", async (_req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT p.*,
-      COALESCE((
-        SELECT json_agg(json_build_object('id', o.id, 'texto', o.texto, 'fecha', o.fecha) ORDER BY o.fecha DESC)
-        FROM project_observations o WHERE o.project_id = p.id
-      ), '[]') AS observaciones
-      FROM projects p
-      ORDER BY p.fecha_creacion DESC;`);
-    res.json({ data: rows });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error getting projects" }); }
-});
-
-// --- Validación de entrada para crear proyecto ---
-const ProjectCreate = z.object({
-  nombre: z.string().min(1),
-  numero_oportunidad: z.string().optional().nullable(),
-  pais: z.string().min(1),
-  consultor: z.string().min(1),
-  monto_oportunidad: z.coerce.number().nonnegative(),
-  client_name: z.string().optional().nullable(),
-  pm: z.string().optional().nullable(),
-  planned_hours: z.coerce.number().optional().nullable(),
-  executed_hours: z.coerce.number().optional().nullable(),
-  hourly_rate: z.coerce.number().optional().nullable(),
-  start_date: z.string().optional().nullable(), // formato "YYYY-MM-DD"
-  end_date: z.string().optional().nullable()
-});
-
-// --- Handler que valida y guarda el proyecto en PostgreSQL ---
-app.post("/api/projects", async (req, res) => {
-  try {
-    const body = ProjectCreate.parse(req.body);
-    const id = uuidv4();
-
-    const { rows } = await pool.query(
-      `INSERT INTO projects (
-        id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
-        client_name, pm, planned_hours, executed_hours, hourly_rate, start_date, end_date
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
-      )
-      RETURNING *;`,
-      [
-        id,
-        body.nombre,
-        body.numero_oportunidad ?? null,
-        body.pais,
-        body.consultor,
-        body.monto_oportunidad,
-        body.client_name ?? null,
-        body.pm ?? null,
-        body.planned_hours ?? null,
-        body.executed_hours ?? null,
-        body.hourly_rate ?? null,
-        body.start_date ?? null,
-        body.end_date ?? null
-      ]
+      activo BOOLEAN NOT NULL DEFAULT true,
+      fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+}
 
-    res.status(201).json({ ok: true, project: rows[0] });
+// ----------------------- Express App ----------------------
+const app = express();
+app.use(express.json());
+
+// Health
+app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// ---------- Projects ----------
+app.get("/api/projects", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM projects ORDER BY fecha_creacion DESC`
+    );
+    res.json({ ok: true, data: rows });
   } catch (e) {
-    if (e?.name === "ZodError") {
-      return res.status(400).json({ ok: false, error: "Datos inválidos", details: e.issues });
-    }
-    console.error("POST /api/projects error:", e);
-    res.status(500).json({ ok: false, error: "Error creando proyecto" });
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error listando proyectos" });
   }
-});
-
-
-app.put("/api/projects/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const fields = ["nombre","numero_oportunidad","pais","consultor","monto_oportunidad","terminado",
-                    "client_name","pm","planned_hours","executed_hours","hourly_rate","start_date","end_date"];
-    const updates = []; const values = [];
-    for (const f of fields) if (Object.prototype.hasOwnProperty.call(req.body, f)) { values.push(req.body[f]); updates.push(`${f} = $${values.length}`); }
-    if (updates.length === 0) return res.json({ ok: true });
-    values.push(id);
-    await pool.query(`UPDATE projects SET ${updates.join(", ")} WHERE id = $${values.length};`, values);
-    res.json({ ok: true });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error updating project" }); }
-});
-
-app.delete("/api/projects/:id", async (req, res) => {
-  try { await pool.query(`DELETE FROM projects WHERE id = $1;`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { console.error(e); res.status(500).json({ error: "Error deleting project" }); }
-});
-
-app.post("/api/projects/:id/observations", async (req, res) => {
-  try {
-    const obsId = uuidv4();
-    await pool.query(`INSERT INTO project_observations (id, project_id, texto) VALUES ($1,$2,$3);`,
-      [obsId, req.params.id, req.body.texto ?? ""]);
-    res.json({ id: obsId });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error adding observation" }); }
 });
 
 app.get("/api/projects/:id", async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT p.*,
-        COALESCE((
-          SELECT json_agg(
-            json_build_object('id', o.id, 'texto', o.texto, 'fecha', o.fecha)
-            ORDER BY o.fecha DESC
-          )
-          FROM project_observations o
-          WHERE o.project_id = p.id
-        ), '[]') AS observaciones
-       FROM projects p
-       WHERE p.id = $1
-       LIMIT 1;`,
+      `SELECT * FROM projects WHERE id = $1 LIMIT 1`,
       [req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ ok: false, error: "No encontrado" });
     res.json({ ok: true, project: rows[0] });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ ok: false, error: "Error leyendo proyecto" });
+    res.status(500).json({ ok: false, error: "Error obteniendo proyecto" });
   }
 });
 
-app.delete("/api/projects/:id/observations/:obsId", async (req, res) => {
+app.post("/api/projects", async (req, res) => {
   try {
-    await pool.query(`DELETE FROM project_observations WHERE id = $1 AND project_id = $2;`,
-      [req.params.obsId, req.params.id]);
-    res.json({ ok: true });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error deleting observation" }); }
+    const parsed = ProjectCreate.parse(req.body);
+
+    const id = uuidv4();
+    const {
+      nombre,
+      numero_oportunidad = null,
+      pais,
+      consultor,
+      monto_oportunidad,
+      client_name = null,
+      pm = null,
+      planned_hours = null,
+      executed_hours = null,
+      hourly_rate = null,
+      start_date = null,
+      end_date = null,
+    } = parsed;
+
+    const { rows } = await pool.query(
+      `
+      INSERT INTO projects
+      (id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
+       client_name, pm, planned_hours, executed_hours, hourly_rate,
+       start_date, end_date)
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      RETURNING *;
+      `,
+      [
+        id,
+        nombre,
+        numero_oportunidad,
+        pais,
+        consultor,
+        monto_oportunidad,
+        client_name,
+        pm,
+        planned_hours,
+        executed_hours,
+        hourly_rate,
+        start_date,
+        end_date,
+      ]
+    );
+
+    res.status(201).json({ ok: true, project: rows[0] });
+  } catch (e) {
+    if (e?.name === "ZodError") {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Datos inválidos", details: e.issues });
+    }
+    console.error("POST /api/projects error:", e);
+    res.status(500).json({ ok: false, error: "Error creando proyecto" });
+  }
 });
 
-// Visits
+app.put("/api/projects/:id", async (req, res) => {
+  try {
+    const data = ProjectUpdate.parse(req.body);
+
+    const allowed = [
+      "nombre",
+      "numero_oportunidad",
+      "pais",
+      "consultor",
+      "monto_oportunidad",
+      "client_name",
+      "pm",
+      "planned_hours",
+      "executed_hours",
+      "hourly_rate",
+      "start_date",
+      "end_date",
+      "terminado",
+    ];
+
+    const sets = [];
+    const values = [];
+    let i = 1;
+
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        sets.push(`${key} = $${i++}`);
+        values.push(data[key]);
+      }
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ ok: false, error: "Nada para actualizar" });
+    }
+
+    values.push(req.params.id);
+    const { rows } = await pool.query(
+      `UPDATE projects SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      values
+    );
+
+    if (!rows[0]) return res.status(404).json({ ok: false, error: "No encontrado" });
+    res.json({ ok: true, project: rows[0] });
+  } catch (e) {
+    if (e?.name === "ZodError") {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Datos inválidos", details: e.issues });
+    }
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error actualizando proyecto" });
+  }
+});
+
+app.delete("/api/projects/:id", async (req, res) => {
+  try {
+    const r = await pool.query(`DELETE FROM projects WHERE id = $1`, [req.params.id]);
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "No encontrado" });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error eliminando proyecto" });
+  }
+});
+
+// ---------- Visits ----------
 app.get("/api/visits", async (_req, res) => {
-  try { const { rows } = await pool.query(`SELECT * FROM visits WHERE activo = TRUE ORDER BY fecha_creacion DESC;`); res.json({ data: rows }); }
-  catch (e) { console.error(e); res.status(500).json({ error: "Error getting visits" }); }
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM visits WHERE activo = true ORDER BY fecha_creacion DESC`
+    );
+    res.json({ ok: true, data: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error listando visitas" });
+  }
 });
 
 app.post("/api/visits", async (req, res) => {
   try {
+    const v = VisitCreate.parse(req.body);
     const id = uuidv4();
-    const { producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad } = req.body;
-    await pool.query(`
-      INSERT INTO visits (id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);`,
-      [id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad]);
-    res.json({ id });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error creating visit" }); }
-});
 
-app.put("/api/visits/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const fields = ["producto","client_name","numero_oportunidad","pais","consultor","hora","fecha","monto_oportunidad","activo"];
-    const updates = []; const values = [];
-    for (const f of fields) if (Object.prototype.hasOwnProperty.call(req.body, f)) { values.push(req.body[f]); updates.push(`${f} = $${values.length}`); }
-    if (updates.length === 0) return res.json({ ok: true });
-    values.push(id);
-    await pool.query(`UPDATE visits SET ${updates.join(", ")} WHERE id = $${values.length};`, values);
-    res.json({ ok: true });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error updating visit" }); }
+    const {
+      producto = null,
+      client_name = null,
+      numero_oportunidad = null,
+      pais = null,
+      consultor = null,
+      hora = null,
+      fecha = null,
+      monto_oportunidad = null,
+      activo = true,
+    } = v;
+
+    const { rows } = await pool.query(
+      `
+      INSERT INTO visits
+      (id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad, activo)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *;
+      `,
+      [
+        id,
+        producto,
+        client_name,
+        numero_oportunidad,
+        pais,
+        consultor,
+        hora,
+        fecha,
+        monto_oportunidad,
+        activo,
+      ]
+    );
+
+    res.status(201).json({ ok: true, visit: rows[0] });
+  } catch (e) {
+    if (e?.name === "ZodError") {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Datos inválidos", details: e.issues });
+    }
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error creando visita" });
+  }
 });
 
 app.delete("/api/visits/:id", async (req, res) => {
-  try { await pool.query(`UPDATE visits SET activo = FALSE WHERE id = $1;`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { console.error(e); res.status(500).json({ error: "Error deleting visit" }); }
+  try {
+    const r = await pool.query(`UPDATE visits SET activo = false WHERE id = $1`, [
+      req.params.id,
+    ]);
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "No encontrada" });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error eliminando visita" });
+  }
 });
 
-// ---------------- Static (SPA) ----------------
-app.use(express.static(path.join(__dirname, "dist")));
-// Express 5: catch-all compatible
-app.get(/.*/, (_req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
+// ----------------------- Static SPA -----------------------
+const distPath = path.join(__dirname, "dist");
+app.use(express.static(distPath));
+
+// Catch-all para SPA (usa "*" para evitar el error de path-to-regexp)
+app.get("*", (req, res) => {
+  res.sendFile(path.join(distPath, "index.html"));
 });
 
-// ---------------- Arranque ----------------
+// ----------------------- Start ----------------------------
 const port = process.env.PORT || 8080;
-app.listen(port, "0.0.0.0", () => {
-  console.log(`App running on http://localhost:${port}`);
-});
+
+(async () => {
+  try {
+    await ensureTables();
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`App running on http://localhost:${port}`);
+    });
+  } catch (e) {
+    console.error("Startup error:", e);
+    process.exit(1);
+  }
+})();
