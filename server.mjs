@@ -6,11 +6,11 @@ import { Pool } from "pg";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 
-// ----------------------- Util paths -----------------------
+// ----------------------- Paths -----------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ----------------------- PG Pool --------------------------
+// ----------------------- PG Config -------------------
 function parseAzureConnString(cs) {
   // Ej: "Database=controlproyectos;Server=projectmn.postgres.database.azure.com;User Id=projectadmin;Password=***"
   const parts = Object.fromEntries(
@@ -25,7 +25,7 @@ function parseAzureConnString(cs) {
       })
   );
   const host = (parts.server || parts.host || "").replace(/^tcp:/i, "");
-  const database = parts.database || parts.db || process.env.PGDATABASE || "postgres";
+  const database = parts.database || parts.db || process.env.PGDATABASE || "controlproyectos";
   const user = parts["userid"] || parts.user || parts.username || process.env.PGUSER;
   const password = parts.password || process.env.PGPASSWORD;
   const port = Number(parts.port || process.env.PGPORT || 5432);
@@ -41,7 +41,7 @@ function parseAzureConnString(cs) {
 }
 
 function buildPgConfig() {
-  // 1) Cadena típica de Azure configurada como "Connection string" del App Service
+  // 1) Connection String del App Service (Azure)
   const azureCs =
     process.env.AZURE_POSTGRESQL_CONNECTIONSTRING ||
     process.env.POSTGRESQLCONNSTR_AZURE_POSTGRESQL_CONNECTIONSTRING ||
@@ -50,7 +50,7 @@ function buildPgConfig() {
 
   if (azureCs) return parseAzureConnString(azureCs);
 
-  // 2) Variables sueltas tipo PGHOST/PGUSER/...
+  // 2) Variables PGHOST/PGUSER/...
   return {
     host: process.env.PGHOST,
     user: process.env.PGUSER,
@@ -70,20 +70,24 @@ console.log("PG config →", {
 });
 const pool = new Pool(pgConfig);
 
-// ----------------------- Zod Schemas ----------------------
-/** Coerción numérica robusta: acepta "1200" o 1200, rechaza NaN */
-const zNumCoerce = z.coerce
-  .number({ invalid_type_error: "Debe ser un número" })
+// ----------------------- Zod Helpers ------------------
+// Coerción numérica compatible (sustituye z.coerce.number para versiones antiguas)
+const zNumCoerce = z
+  .preprocess((v) => {
+    if (v === null || v === undefined) return v;        // permitir null/undefined
+    if (typeof v === "string" && v.trim() === "") return null; // "" -> null
+    const n = Number(typeof v === "string" ? v.trim() : v);
+    return Number.isFinite(n) ? n : NaN;                // NaN para que z.number lo rechace
+  }, z.number({ invalid_type_error: "Debe ser un número" }))
   .refine((n) => Number.isFinite(n), { message: "Debe ser un número válido" });
 
+// ----------------------- Schemas ----------------------
 const ProjectCreate = z.object({
-  // obligatorios
   nombre: z.string().min(1, "nombre es requerido"),
   pais: z.string().min(1, "pais es requerido"),
   consultor: z.string().min(1, "consultor es requerido"),
   monto_oportunidad: zNumCoerce.min(0, "monto_oportunidad debe ser >= 0"),
 
-  // opcionales
   numero_oportunidad: z.string().nullable().optional(),
   client_name: z.string().nullable().optional(),
   pm: z.string().nullable().optional(),
@@ -92,7 +96,6 @@ const ProjectCreate = z.object({
   executed_hours: zNumCoerce.nullable().optional(),
   hourly_rate: zNumCoerce.nullable().optional(),
 
-  // fechas como "YYYY-MM-DD" o null
   start_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
@@ -128,16 +131,12 @@ const VisitCreate = z.object({
   pais: z.string().nullable().optional(),
   consultor: z.string().nullable().optional(),
   hora: z.string().nullable().optional(),
-  fecha: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   monto_oportunidad: zNumCoerce.nullable().optional(),
   activo: z.boolean().optional(),
 });
 
-// ----------------------- Ensure Tables --------------------
+// ----------------------- Ensure Tables ----------------
 async function ensureTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -176,15 +175,15 @@ async function ensureTables() {
   `);
 }
 
-// ----------------------- Express App ----------------------
+// ----------------------- Express ----------------------
 const app = express();
 app.use(express.json());
 
 // Health
-app.get("/api/health", (req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 // ---------- Projects ----------
-app.get("/api/projects", async (req, res) => {
+app.get("/api/projects", async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT * FROM projects ORDER BY fecha_creacion DESC`
@@ -410,16 +409,16 @@ app.delete("/api/visits/:id", async (req, res) => {
   }
 });
 
-// ----------------------- Static SPA -----------------------
+// ----------------------- Static SPA -------------------
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
-// Catch-all para SPA (usa "*" para evitar el error de path-to-regexp)
-app.get("*", (req, res) => {
+// Catch-all para SPA (evita error path-to-regexp con /(.*))
+app.get("*", (_req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-// ----------------------- Start ----------------------------
+// ----------------------- Start ------------------------
 const port = process.env.PORT || 8080;
 
 (async () => {
