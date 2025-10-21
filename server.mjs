@@ -42,6 +42,14 @@ function parseAzureConnString(cs) {
 
 function buildPgConfig() {
   // 1) Connection String del App Service (Azure)
+   const customCs =
+    process.env.CUSTOMCONNSTR_AZURE_POSTGRESQL_CONNECTIONSTRING ||
+    process.env.CUSTOMCONNSTR_POSTGRESQL ||
+    process.env.CUSTOMCONNSTR_DEFAULT;
+
+  if (customCs) return parseAzureConnString(customCs);
+  
+   // Ya existentes (por si algún día cambias el tipo):
   const azureCs =
     process.env.AZURE_POSTGRESQL_CONNECTIONSTRING ||
     process.env.POSTGRESQLCONNSTR_AZURE_POSTGRESQL_CONNECTIONSTRING ||
@@ -49,6 +57,7 @@ function buildPgConfig() {
     process.env.POSTGRESQLCONNSTR_DEFAULT;
 
   if (azureCs) return parseAzureConnString(azureCs);
+
 
   // 2) Variables PGHOST/PGUSER/...
   return {
