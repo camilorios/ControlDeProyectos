@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Pool } from "pg";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -137,20 +138,60 @@ app.get("/api/projects", async (_req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: "Error getting projects" }); }
 });
 
+// --- Validación de entrada para crear proyecto ---
+const ProjectCreate = z.object({
+  nombre: z.string().min(1),
+  numero_oportunidad: z.string().optional().nullable(),
+  pais: z.string().min(1),
+  consultor: z.string().min(1),
+  monto_oportunidad: z.coerce.number().nonnegative(),
+  client_name: z.string().optional().nullable(),
+  pm: z.string().optional().nullable(),
+  planned_hours: z.coerce.number().optional().nullable(),
+  executed_hours: z.coerce.number().optional().nullable(),
+  hourly_rate: z.coerce.number().optional().nullable(),
+  start_date: z.string().optional().nullable(), // formato "YYYY-MM-DD"
+  end_date: z.string().optional().nullable()
+});
+
+// --- Handler que valida y guarda el proyecto en PostgreSQL ---
 app.post("/api/projects", async (req, res) => {
   try {
+    const body = ProjectCreate.parse(req.body);
     const id = uuidv4();
-    const { nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
-            client_name, pm, planned_hours, executed_hours, hourly_rate, start_date, end_date } = req.body;
-    await pool.query(`
-      INSERT INTO projects (
+
+    await pool.query(
+      `INSERT INTO projects (
         id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
         client_name, pm, planned_hours, executed_hours, hourly_rate, start_date, end_date
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13);`,
-      [id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
-       client_name, pm, planned_hours, executed_hours, hourly_rate, start_date, end_date]);
-    res.json({ id });
-  } catch (e) { console.error(e); res.status(500).json({ error: "Error creating project" }); }
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+      );`,
+      [
+        id,
+        body.nombre,
+        body.numero_oportunidad ?? null,
+        body.pais,
+        body.consultor,
+        body.monto_oportunidad,
+        body.client_name ?? null,
+        body.pm ?? null,
+        body.planned_hours ?? null,
+        body.executed_hours ?? null,
+        body.hourly_rate ?? null,
+        body.start_date ?? null,
+        body.end_date ?? null
+      ]
+    );
+
+    res.status(201).json({ ok: true, id });
+  } catch (e) {
+    if (e?.name === "ZodError") {
+      return res.status(400).json({ ok: false, error: "Datos inválidos", details: e.issues });
+    }
+    console.error("POST /api/projects error:", e);
+    res.status(500).json({ ok: false, error: "Error creando proyecto" });
+  }
 });
 
 app.put("/api/projects/:id", async (req, res) => {
