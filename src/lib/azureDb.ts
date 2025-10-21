@@ -1,7 +1,7 @@
 // src/lib/azureDb.ts
 import { api } from "./http";
 
-// Tipos mínimos (ajusta con tus tipos reales si ya existen)
+// ---------- Tipos (ajústalos si ya tienes tus propios tipos) ----------
 export type Project = {
   id: string;
   nombre: string;
@@ -53,41 +53,60 @@ export type NewVisit = Omit<Visit, "id" | "fecha_creacion" | "activo"> & {
   activo?: boolean;
 };
 
-// ------------- PROJECTS -------------
-// Lo que antes era: callEdgeFunction('azure-db-projects', { method: 'GET_ALL' })
+// ---------- Funciones REST contra /api ----------
+// PROJECTS
 export async function getAllProjects(): Promise<Project[]> {
   return api.get<Project[]>("/api/projects");
 }
-
-// Lo que antes era: ... { method: 'CREATE', body }
 export async function createProject(body: NewProject): Promise<Project> {
   return api.post<Project>("/api/projects", body);
 }
-
-// Lo que antes era: ... { method: 'GET_ONE', id }
 export async function getProjectById(id: string): Promise<Project> {
   return api.get<Project>(`/api/projects/${id}`);
 }
-
-// Lo que antes era: ... { method: 'UPDATE', id, body }
-export async function updateProject(id: string, body: Partial<NewProject>): Promise<Project> {
+export async function updateProject(
+  id: string,
+  body: Partial<NewProject> & { terminado?: boolean }
+): Promise<Project> {
   return api.put<Project>(`/api/projects/${id}`, body);
 }
-
-// Lo que antes era: ... { method: 'DELETE', id }
 export async function deleteProject(id: string): Promise<{ ok: true }> {
   return api.del<{ ok: true }>(`/api/projects/${id}`);
 }
 
-// ------------- VISITS -------------
+// VISITS
 export async function getAllVisits(): Promise<Visit[]> {
   return api.get<Visit[]>("/api/visits");
 }
-
 export async function createVisit(body: NewVisit): Promise<Visit> {
   return api.post<Visit>("/api/visits", body);
 }
-
 export async function deleteVisit(id: string): Promise<{ ok: true }> {
   return api.del<{ ok: true }>(`/api/visits/${id}`);
 }
+
+// ---------- OBJETOS de compatibilidad (lo que piden los componentes) ----------
+// Muchos componentes importaban { projectsApi } desde '@/lib/azureDb'.
+// Exportamos un objeto con los nombres "típicos" para no romper nada.
+export const projectsApi = {
+  // listas
+  getAll: getAllProjects,
+  list: getAllProjects,      // alias
+  // lectura
+  getOne: getProjectById,
+  getById: getProjectById,   // alias
+  // escritura
+  create: createProject,
+  update: updateProject,
+  delete: deleteProject,
+  remove: deleteProject      // alias
+};
+
+// Y lo mismo para visitas si hay componentes que lo usen así:
+export const visitsApi = {
+  getAll: getAllVisits,
+  list: getAllVisits,        // alias
+  create: createVisit,
+  delete: deleteVisit,
+  remove: deleteVisit        // alias
+};
