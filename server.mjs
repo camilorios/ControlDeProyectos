@@ -120,6 +120,22 @@ const zDateOpt = z
     .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
     .nullable())
   .optional();
+  
+  // Acepta "", null, undefined, NaN, "nan" y cae al valor por defecto (0)
+const zNumberOrDefault = (def = 0) =>
+  z.preprocess((v) => {
+    if (v === null || v === undefined) return def;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      if (s === "" || s === "nan") return def;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : def;
+    }
+    if (typeof v === "number") {
+      return Number.isFinite(v) ? v : def;
+    }
+    return def;
+  }, z.number());
 
 // ----------------------- Schemas ----------------------
 const ProjectCreate = z.object({
@@ -127,7 +143,8 @@ const ProjectCreate = z.object({
   pais: z.string().min(1, "pais es requerido"),
   consultor: z.string().min(1, "consultor es requerido"),
 
-  monto_oportunidad: zNumRequired.refine((n) => n >= 0, {
+  // NUEVO: acepta "", null, NaN, "nan" y los convierte a 0; valida >= 0
+  monto_oportunidad: zNumberOrDefault(0).refine((n) => n >= 0, {
     message: "monto_oportunidad debe ser >= 0",
   }),
 
