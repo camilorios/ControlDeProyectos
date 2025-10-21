@@ -74,10 +74,10 @@ const pool = new Pool(pgConfig);
 // Coerción numérica compatible (sustituye z.coerce.number para versiones antiguas)
 const zNumCoerce = z
   .preprocess((v) => {
-    if (v === null || v === undefined) return v;        // permitir null/undefined
+    if (v === null || v === undefined) return v;         // permitir null/undefined
     if (typeof v === "string" && v.trim() === "") return null; // "" -> null
     const n = Number(typeof v === "string" ? v.trim() : v);
-    return Number.isFinite(n) ? n : NaN;                // NaN para que z.number lo rechace
+    return Number.isFinite(n) ? n : NaN;                 // NaN para que z.number lo rechace
   }, z.number({ invalid_type_error: "Debe ser un número" }))
   .refine((n) => Number.isFinite(n), { message: "Debe ser un número válido" });
 
@@ -86,7 +86,10 @@ const ProjectCreate = z.object({
   nombre: z.string().min(1, "nombre es requerido"),
   pais: z.string().min(1, "pais es requerido"),
   consultor: z.string().min(1, "consultor es requerido"),
-  monto_oportunidad: zNumCoerce.min(0, "monto_oportunidad debe ser >= 0"),
+  // IMPORTANTE: no usamos .min(); usamos refine para >= 0
+  monto_oportunidad: zNumCoerce.refine((n) => n >= 0, {
+    message: "monto_oportunidad debe ser >= 0",
+  }),
 
   numero_oportunidad: z.string().nullable().optional(),
   client_name: z.string().nullable().optional(),
