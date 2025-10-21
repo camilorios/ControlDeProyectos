@@ -228,7 +228,7 @@ app.delete("/api/visits/:id", async (req, res) => {
 // ---------------- Static (SPA) ----------------
 app.use(express.static(path.join(__dirname, "dist")));
 // Express 5: catch-all compatible
-app.get("/(.*)", (_req, res) => {
+app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
