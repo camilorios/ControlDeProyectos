@@ -29,3 +29,4 @@ jobs:
           app-name: pmmic
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISH_PROFILE }}
           package: .
+          clean: true
