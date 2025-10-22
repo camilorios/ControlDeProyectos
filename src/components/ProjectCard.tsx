@@ -27,17 +27,17 @@ interface Project {
   id: string;
   name: string;
   description: string;
-  plannedHours: number;
-  executedHours: number;
-  hourlyRate: number;
-  startDate: string;
-  endDate: string;
+  plannedHours: number | null | undefined;
+  executedHours: number | null | undefined;
+  hourlyRate: number | null | undefined;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
   clientName: string;
   consultant: string;
   pm: string;
   country: string;
   numeroOportunidad: string;
-  observaciones: Array<{ id: string; text: string; date: string }>;
+  observaciones: Array<{ id: string; text: string; date: string }> | null | undefined;
   terminado: boolean;
 }
 
@@ -53,35 +53,49 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [hoursToAdd, setHoursToAdd] = useState("");
 
-  // Edit form states
-  const [editName, setEditName] = useState(project.name);
-  const [editDescription, setEditDescription] = useState(project.description);
-  const [editClientName, setEditClientName] = useState(project.clientName);
-  const [editConsultant, setEditConsultant] = useState(project.consultant);
-  const [editPm, setEditPm] = useState(project.pm);
-  const [editCountry, setEditCountry] = useState(project.country);
-  const [editPlannedHours, setEditPlannedHours] = useState(project.plannedHours.toString());
-  const [editExecutedHours, setEditExecutedHours] = useState(project.executedHours.toString());
-  const [editStartDate, setEditStartDate] = useState(project.startDate);
-  const [editEndDate, setEditEndDate] = useState(project.endDate);
-  const [editHourlyRate, setEditHourlyRate] = useState(project.hourlyRate.toString());
-  const [editTerminado, setEditTerminado] = useState(project.terminado);
+  // Edit form states (sin `.toString()`; usamos String() con fallback)
+  const [editName, setEditName] = useState(project.name ?? "");
+  const [editDescription, setEditDescription] = useState(project.description ?? "");
+  const [editClientName, setEditClientName] = useState(project.clientName ?? "");
+  const [editConsultant, setEditConsultant] = useState(project.consultant ?? "");
+  const [editPm, setEditPm] = useState(project.pm ?? "");
+  const [editCountry, setEditCountry] = useState(project.country ?? "");
+  const [editPlannedHours, setEditPlannedHours] = useState(String(project.plannedHours ?? ""));
+  const [editExecutedHours, setEditExecutedHours] = useState(String(project.executedHours ?? ""));
+  const [editStartDate, setEditStartDate] = useState(project.startDate ?? "");
+  const [editEndDate, setEditEndDate] = useState(project.endDate ?? "");
+  const [editHourlyRate, setEditHourlyRate] = useState(String(project.hourlyRate ?? ""));
+  const [editTerminado, setEditTerminado] = useState(Boolean(project.terminado));
   const [newObservacion, setNewObservacion] = useState("");
 
-  const progress = (project.executedHours / project.plannedHours) * 100;
-  const totalCost = project.executedHours * project.hourlyRate;
-  const estimatedCost = project.plannedHours * project.hourlyRate;
-  const isOverBudget = project.executedHours > project.plannedHours;
+  // Valores numéricos saneados para mostrar y calcular
+  const planned = Number(project.plannedHours ?? 0) || 0;
+  const executed = Number(project.executedHours ?? 0) || 0;
+  const rate = Number(project.hourlyRate ?? 0) || 0;
 
-  // Calculate time-based status
+  const progress = planned > 0 ? (executed / planned) * 100 : 0;
+  const totalCost = executed * rate;
+  const estimatedCost = planned * rate;
+  const isOverBudget = executed > planned;
+
+  // Fechas: protecciones contra strings vacíos o inválidos
   const now = new Date();
-  const start = new Date(project.startDate);
-  const end = new Date(project.endDate);
-  const totalDuration = end.getTime() - start.getTime();
-  const elapsed = now.getTime() - start.getTime();
-  const timeProgress = Math.min(Math.max((elapsed / totalDuration) * 100, 0), 100);
+  const start = project.startDate ? new Date(project.startDate) : null;
+  const end = project.endDate ? new Date(project.endDate) : null;
+
+  let timeProgress = 0;
+  if (start && end && !isNaN(start.getTime()) && !isNaN(end.getTime())) {
+    const totalDuration = end.getTime() - start.getTime();
+    const elapsed = now.getTime() - start.getTime();
+    timeProgress = totalDuration > 0 ? Math.min(Math.max((elapsed / totalDuration) * 100, 0), 100) : 0;
+  }
 
   const getProjectStatus = () => {
+    // si las fechas no son válidas, considerar "En Progreso"
+    if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return { label: "En Progreso", variant: "outline" as const, icon: Clock };
+    }
+
     if (now < start) {
       return { label: "Pendiente", variant: "secondary" as const, icon: Clock };
     }
@@ -91,7 +105,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
         : { label: "Retrasado", variant: "destructive" as const, icon: AlertCircle };
     }
 
-    // Project is in progress
+    // En progreso
     if (progress < timeProgress - 10) {
       return { label: "Atrasado", variant: "destructive" as const, icon: AlertCircle };
     } else if (progress > timeProgress + 10) {
@@ -112,7 +126,6 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
     }
 
     try {
-      // si existe en el SDK, persiste en BD; si no, no falla
       await projectsApi.addHours?.(project.id, hours);
       onUpdateHours(project.id, hours);
       setHoursToAdd("");
@@ -154,16 +167,16 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
     }
 
     const payload: Partial<Project> = {
-      name: editName.trim(),
-      description: editDescription.trim(),
+      name: (editName ?? "").trim(),
+      description: (editDescription ?? "").trim(),
       plannedHours: hours,
       executedHours: executedHours,
       startDate: editStartDate,
       endDate: editEndDate,
-      clientName: editClientName.trim(),
-      consultant: editConsultant.trim(),
-      pm: editPm.trim(),
-      country: editCountry.trim(),
+      clientName: (editClientName ?? "").trim(),
+      consultant: (editConsultant ?? "").trim(),
+      pm: (editPm ?? "").trim(),
+      country: (editCountry ?? "").trim(),
       hourlyRate: rate,
       terminado: editTerminado,
     };
@@ -196,6 +209,8 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
     }
   };
 
+  const safeObservaciones = project.observaciones ?? [];
+
   const handleAddObservacion = async () => {
     if (!newObservacion.trim()) {
       toast.error("La observación no puede estar vacía");
@@ -216,7 +231,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
       });
 
       onUpdateProject(project.id, {
-        observaciones: [...project.observaciones, nuevaObservacion],
+        observaciones: [...safeObservaciones, nuevaObservacion],
       });
 
       setNewObservacion("");
@@ -280,11 +295,14 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
               )}
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Calendar className="w-3 h-3" />
-                <span>{new Date(project.startDate).toLocaleDateString()} - {new Date(project.endDate).toLocaleDateString()}</span>
+                <span>
+                  {project.startDate ? new Date(project.startDate).toLocaleDateString() : "-"} -{" "}
+                  {project.endDate ? new Date(project.endDate).toLocaleDateString() : "-"}
+                </span>
               </div>
               <div className="flex items-center gap-1 text-primary font-medium">
                 <DollarSign className="w-3 h-3" />
-                <span>${project.hourlyRate}/h</span>
+                <span>${rate}/h</span>
               </div>
             </div>
           </div>
@@ -294,7 +312,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
             <div className="flex flex-col items-center justify-center min-w-[120px]">
               <Progress value={Math.min(progress, 100)} className="h-2 w-24 mb-2" />
               <span className={`text-sm font-semibold ${isOverBudget ? "text-warning" : "text-success"}`}>
-                {project.executedHours} / {project.plannedHours} hrs
+                {executed} / {planned} hrs
               </span>
             </div>
 
@@ -304,7 +322,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Planificado</p>
-                <p className="text-sm font-semibold text-foreground">{project.plannedHours}h</p>
+                <p className="text-sm font-semibold text-foreground">{planned}h</p>
               </div>
             </div>
 
@@ -314,7 +332,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Ejecutado</p>
-                <p className="text-sm font-semibold text-foreground">{project.executedHours}h</p>
+                <p className="text-sm font-semibold text-foreground">{executed}h</p>
               </div>
             </div>
 
@@ -350,7 +368,8 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                 <AlertDialogHeader>
                   <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Esta acción archivará el proyecto (no se elimina de la base de datos). Solo se puede archivar si el proyecto está marcado como Finalizado.
+                    Esta acción archivará el proyecto (no se elimina de la base de datos). Solo se puede archivar si el proyecto está
+                    marcado como Finalizado.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -469,9 +488,9 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                   <div className="border-t pt-4 mt-4">
                     <Label className="mb-3 block">Observaciones</Label>
 
-                    {project.observaciones.length > 0 && (
+                    {safeObservaciones.length > 0 && (
                       <div className="space-y-2 mb-4 max-h-[200px] overflow-y-auto">
-                        {project.observaciones.map((obs) => (
+                        {safeObservaciones.map((obs) => (
                           <div key={obs.id} className="p-3 bg-muted rounded-lg">
                             <p className="text-sm text-foreground mb-1">{obs.text}</p>
                             <p className="text-xs text-muted-foreground">

@@ -23,7 +23,7 @@ let count = 0;
 
 function genId() {
   count = (count + 1) % Number.MAX_SAFE_INTEGER;
-  return count.toString();
+  return String(count ?? 0);
 }
 
 type ActionType = typeof actionTypes;

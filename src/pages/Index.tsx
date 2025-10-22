@@ -62,14 +62,14 @@ const Index = () => {
           plannedHours: 0,
           executedHours: 0,
           hourlyRate: 0,
-          startDate: new Date(p.fecha_creacion).toISOString().split('T')[0],
+          startDate: new Date(p.fecha_creacion).toISOString().split("T")[0],
           endDate: "",
           clientName: "",
           consultant: p.consultor,
           pm: "",
           country: p.pais,
           numeroOportunidad: p.numero_oportunidad || "",
-          observaciones: (p.observaciones || []).map(obs => ({
+          observaciones: (p.observaciones || []).map((obs) => ({
             id: obs.id,
             text: obs.texto,
             date: obs.fecha,
@@ -83,7 +83,7 @@ const Index = () => {
           producto: v.producto,
           pais: v.pais,
           consultor: v.consultor,
-          tiempo: parseFloat(v.hora),
+          tiempo: Number(v.hora ?? 0),
           fecha: v.fecha,
           valorOportunidad: v.monto_oportunidad,
           clientName: v.client_name,
@@ -93,10 +93,11 @@ const Index = () => {
         setProjects(mappedProjects);
         setVisits(mappedVisits);
       } catch (error) {
-        console.error('Error cargando datos:', error);
+        console.error("Error cargando datos:", error);
         toast({
           title: "Error de conexión",
-          description: "No se puede conectar a la base de datos Azure. Verifica que el firewall de Azure permita conexiones desde las IPs de Supabase.",
+          description:
+            "No se puede conectar a la base de datos Azure. Verifica que el firewall de Azure permita conexiones desde las IPs de Supabase.",
           variant: "destructive",
         });
         // Permitir que la app cargue con datos vacíos
@@ -124,7 +125,7 @@ const Index = () => {
     numeroOportunidad: string;
   }) => {
     try {
-      const newId = Date.now().toString();
+      const newId = String(Date.now());
       await projectsApi.create({
         id: newId,
         nombre: projectData.name,
@@ -143,13 +144,13 @@ const Index = () => {
         terminado: false,
       };
       setProjects([...projects, newProject]);
-      
+
       toast({
         title: "Proyecto creado",
         description: "El proyecto se ha guardado en la base de datos",
       });
     } catch (error) {
-      console.error('Error creando proyecto:', error);
+      console.error("Error creando proyecto:", error);
       toast({
         title: "Error",
         description: "No se pudo crear el proyecto",
@@ -170,24 +171,23 @@ const Index = () => {
 
   const handleUpdateProject = async (id: string, updates: Partial<Project>) => {
     try {
-      const project = projects.find(p => p.id === id);
+      const project = projects.find((p) => p.id === id);
       if (!project) return;
 
       const updatedProject = { ...project, ...updates };
-      
+
       await projectsApi.update(id, {
         nombre: updatedProject.name,
         numeroOportunidad: updatedProject.numeroOportunidad,
         pais: updatedProject.country,
         consultor: updatedProject.consultant,
-        montoOportunidad: updatedProject.plannedHours * updatedProject.hourlyRate,
+        montoOportunidad:
+          updatedProject.plannedHours * updatedProject.hourlyRate,
         terminado: updatedProject.terminado,
       });
 
       setProjects(
-        projects.map((project) =>
-          project.id === id ? updatedProject : project
-        )
+        projects.map((project) => (project.id === id ? updatedProject : project))
       );
 
       toast({
@@ -195,7 +195,7 @@ const Index = () => {
         description: "Los cambios se han guardado en la base de datos",
       });
     } catch (error) {
-      console.error('Error actualizando proyecto:', error);
+      console.error("Error actualizando proyecto:", error);
       toast({
         title: "Error",
         description: "No se pudo actualizar el proyecto",
@@ -208,13 +208,13 @@ const Index = () => {
     try {
       await projectsApi.delete(id);
       setProjects(projects.filter((project) => project.id !== id));
-      
+
       toast({
         title: "Proyecto eliminado",
         description: "El proyecto se ha eliminado de la base de datos",
       });
     } catch (error) {
-      console.error('Error eliminando proyecto:', error);
+      console.error("Error eliminando proyecto:", error);
       toast({
         title: "Error",
         description: "No se pudo eliminar el proyecto",
@@ -234,7 +234,7 @@ const Index = () => {
     numeroOportunidad: string;
   }) => {
     try {
-      const newId = Date.now().toString();
+      const newId = String(Date.now());
       await visitsApi.create({
         id: newId,
         producto: visitData.producto,
@@ -242,7 +242,7 @@ const Index = () => {
         numeroOportunidad: visitData.numeroOportunidad,
         pais: visitData.pais,
         consultor: visitData.consultor,
-        hora: visitData.tiempo.toString(),
+        hora: String(visitData.tiempo ?? 0),
         fecha: visitData.fecha,
         montoOportunidad: visitData.valorOportunidad,
       });
@@ -252,13 +252,13 @@ const Index = () => {
         ...visitData,
       };
       setVisits([...visits, newVisit]);
-      
+
       toast({
         title: "Visita creada",
         description: "La visita comercial se ha guardado en la base de datos",
       });
     } catch (error) {
-      console.error('Error creando visita:', error);
+      console.error("Error creando visita:", error);
       toast({
         title: "Error",
         description: "No se pudo crear la visita comercial",
@@ -271,13 +271,13 @@ const Index = () => {
     try {
       await visitsApi.delete(id);
       setVisits(visits.filter((visit) => visit.id !== id));
-      
+
       toast({
         title: "Visita eliminada",
         description: "La visita comercial se ha eliminado de la base de datos",
       });
     } catch (error) {
-      console.error('Error eliminando visita:', error);
+      console.error("Error eliminando visita:", error);
       toast({
         title: "Error",
         description: "No se pudo eliminar la visita comercial",
@@ -294,23 +294,19 @@ const Index = () => {
         numeroOportunidad: visitData.numeroOportunidad,
         pais: visitData.pais,
         consultor: visitData.consultor,
-        hora: visitData.tiempo.toString(),
+        hora: String(visitData.tiempo ?? 0),
         fecha: visitData.fecha,
         montoOportunidad: visitData.valorOportunidad,
       });
 
-      setVisits(
-        visits.map((visit) =>
-          visit.id === id ? { ...visitData, id } : visit
-        )
-      );
-      
+      setVisits(visits.map((visit) => (visit.id === id ? { ...visitData, id } : visit)));
+
       toast({
         title: "Visita actualizada",
         description: "Los cambios se han guardado en la base de datos",
       });
     } catch (error) {
-      console.error('Error actualizando visita:', error);
+      console.error("Error actualizando visita:", error);
       toast({
         title: "Error",
         description: "No se pudo actualizar la visita comercial",
@@ -321,7 +317,10 @@ const Index = () => {
 
   const totalPlannedHours = projects.reduce((sum, p) => sum + p.plannedHours, 0);
   const totalExecutedHours = projects.reduce((sum, p) => sum + p.executedHours, 0);
-  const totalRevenue = projects.reduce((sum, p) => sum + p.executedHours * p.hourlyRate, 0);
+  const totalRevenue = projects.reduce(
+    (sum, p) => sum + p.executedHours * p.hourlyRate,
+    0
+  );
   const totalVisits = visits.length;
 
   if (loading) {
@@ -337,11 +336,7 @@ const Index = () => {
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <img 
-            src={tigoLogo} 
-            alt="Tigo Business" 
-            className="h-16 md:h-20 object-contain"
-          />
+          <img src={tigoLogo} alt="Tigo Business" className="h-16 md:h-20 object-contain" />
         </div>
 
         {/* Header */}
@@ -415,14 +410,14 @@ const Index = () => {
             </div>
           ) : (
             <div className="space-y-4">
-            {visits.map((visit) => (
-              <VisitCard
-                key={visit.id}
-                visit={visit}
-                onDeleteVisit={handleDeleteVisit}
-                onUpdateVisit={handleUpdateVisit}
-              />
-            ))}
+              {visits.map((visit) => (
+                <VisitCard
+                  key={visit.id}
+                  visit={visit}
+                  onDeleteVisit={handleDeleteVisit}
+                  onUpdateVisit={handleUpdateVisit}
+                />
+              ))}
             </div>
           )}
         </div>

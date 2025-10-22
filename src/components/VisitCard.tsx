@@ -1,7 +1,18 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Briefcase, Clock, DollarSign, MapPin, User, Calendar, Trash2, Building2, Hash, Pencil } from "lucide-react";
+import {
+  Briefcase,
+  Clock,
+  DollarSign,
+  MapPin,
+  User,
+  Calendar,
+  Trash2,
+  Building2,
+  Hash,
+  Pencil,
+} from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,9 +34,9 @@ interface Visit {
   producto: string;
   pais: string;
   consultor: string;
-  tiempo: number;
-  fecha: string;
-  valorOportunidad: number;
+  tiempo: number; // puede venir null/undefined desde el backend en algunos casos
+  fecha: string;  // ISO o "YYYY-MM-DD"
+  valorOportunidad: number; // idem
   clientName: string;
   numeroOportunidad: string;
 }
@@ -38,14 +49,22 @@ interface VisitCardProps {
 
 export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProps) => {
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [producto, setProducto] = useState(visit.producto);
-  const [pais, setPais] = useState(visit.pais);
-  const [consultor, setConsultor] = useState(visit.consultor);
-  const [tiempo, setTiempo] = useState(visit.tiempo.toString());
-  const [fecha, setFecha] = useState(visit.fecha);
-  const [valorOportunidad, setValorOportunidad] = useState(visit.valorOportunidad.toString());
-  const [clientName, setClientName] = useState(visit.clientName);
-  const [numeroOportunidad, setNumeroOportunidad] = useState(visit.numeroOportunidad);
+
+  // Estados de formulario (si el valor viene null/undefined, iniciamos en cadena vacía)
+  const [producto, setProducto] = useState<string>(visit.producto ?? "");
+  const [pais, setPais] = useState<string>(visit.pais ?? "");
+  const [consultor, setConsultor] = useState<string>(visit.consultor ?? "");
+  const [tiempo, setTiempo] = useState<string>(
+    typeof visit.tiempo === "number" && Number.isFinite(visit.tiempo) ? String(visit.tiempo) : ""
+  );
+  const [fecha, setFecha] = useState<string>(visit.fecha ?? "");
+  const [valorOportunidad, setValorOportunidad] = useState<string>(
+    typeof visit.valorOportunidad === "number" && Number.isFinite(visit.valorOportunidad)
+      ? String(visit.valorOportunidad)
+      : ""
+  );
+  const [clientName, setClientName] = useState<string>(visit.clientName ?? "");
+  const [numeroOportunidad, setNumeroOportunidad] = useState<string>(visit.numeroOportunidad ?? "");
 
   const handleDelete = () => {
     onDeleteVisit(visit.id);
@@ -53,27 +72,21 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
   };
 
   const handleUpdate = () => {
-    if (!producto.trim()) {
-      toast.error("El producto es requerido");
-      return;
+    // Validaciones básicas
+    if (!producto.trim()) return toast.error("El producto es requerido");
+
+    // Convertir números con tolerancia a coma decimal
+    const tiempoNum = Number(String(tiempo).replace(",", "."));
+    if (!Number.isFinite(tiempoNum) || tiempoNum <= 0) {
+      return toast.error("Por favor ingrese un tiempo válido");
     }
 
-    const tiempoNum = parseFloat(tiempo);
-    if (isNaN(tiempoNum) || tiempoNum <= 0) {
-      toast.error("Por favor ingrese un tiempo válido");
-      return;
+    const valorNum = Number(String(valorOportunidad).replace(",", "."));
+    if (!Number.isFinite(valorNum) || valorNum < 0) {
+      return toast.error("Por favor ingrese un valor de oportunidad válido");
     }
 
-    const valor = parseFloat(valorOportunidad);
-    if (isNaN(valor) || valor <= 0) {
-      toast.error("Por favor ingrese un valor de oportunidad válido");
-      return;
-    }
-
-    if (!fecha) {
-      toast.error("La fecha es requerida");
-      return;
-    }
+    if (!fecha) return toast.error("La fecha es requerida");
 
     onUpdateVisit(visit.id, {
       producto: producto.trim(),
@@ -81,7 +94,7 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
       consultor: consultor.trim(),
       tiempo: tiempoNum,
       fecha,
-      valorOportunidad: valor,
+      valorOportunidad: valorNum,
       clientName: clientName.trim(),
       numeroOportunidad: numeroOportunidad.trim(),
     });
@@ -89,6 +102,17 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
     setIsEditOpen(false);
     toast.success("Visita comercial actualizada");
   };
+
+  // Valores mostrados con fallback, para no romper si el backend envía null
+  const tiempoShown =
+    typeof visit.tiempo === "number" && Number.isFinite(visit.tiempo) ? `${visit.tiempo}h` : "—";
+
+  const valorShown =
+    typeof visit.valorOportunidad === "number" && Number.isFinite(visit.valorOportunidad)
+      ? `$${visit.valorOportunidad.toLocaleString()}`
+      : "$0";
+
+  const fechaShown = visit.fecha ? new Date(visit.fecha).toLocaleDateString() : "—";
 
   return (
     <Card className="bg-gradient-card shadow-md hover:shadow-lg transition-all duration-300 border-border overflow-hidden">
@@ -102,39 +126,44 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
               </div>
               <h3 className="text-lg font-semibold text-foreground truncate">{visit.producto}</h3>
             </div>
+
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
               {visit.clientName && (
                 <div className="flex items-center gap-1">
                   <Building2 className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-muted-foreground">Cliente:</span> 
+                  <span className="text-muted-foreground">Cliente:</span>
                   <span className="font-medium">{visit.clientName}</span>
                 </div>
               )}
+
               {visit.numeroOportunidad && (
                 <div className="flex items-center gap-1">
                   <Hash className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-muted-foreground">Oportunidad:</span> 
+                  <span className="text-muted-foreground">Oportunidad:</span>
                   <span className="font-medium">{visit.numeroOportunidad}</span>
                 </div>
               )}
+
               {visit.pais && (
                 <div className="flex items-center gap-1">
                   <MapPin className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-muted-foreground">País:</span> 
+                  <span className="text-muted-foreground">País:</span>
                   <span className="font-medium">{visit.pais}</span>
                 </div>
               )}
+
               {visit.consultor && (
                 <div className="flex items-center gap-1">
                   <User className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-muted-foreground">Consultor:</span> 
+                  <span className="text-muted-foreground">Consultor:</span>
                   <span className="font-medium">{visit.consultor}</span>
                 </div>
               )}
+
               <div className="flex items-center gap-1">
                 <Calendar className="w-3 h-3 text-muted-foreground" />
                 <span className="text-muted-foreground">Fecha:</span>
-                <span className="font-medium">{new Date(visit.fecha).toLocaleDateString()}</span>
+                <span className="font-medium">{fechaShown}</span>
               </div>
             </div>
           </div>
@@ -147,7 +176,7 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Tiempo</p>
-                <p className="text-sm font-semibold text-foreground">{visit.tiempo}h</p>
+                <p className="text-sm font-semibold text-foreground">{tiempoShown}</p>
               </div>
             </div>
 
@@ -157,7 +186,7 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Oportunidad</p>
-                <p className="text-sm font-semibold text-foreground">${visit.valorOportunidad.toLocaleString()}</p>
+                <p className="text-sm font-semibold text-foreground">{valorShown}</p>
               </div>
             </div>
           </div>
@@ -171,10 +200,12 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
                   Editar
                 </Button>
               </DialogTrigger>
+
               <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
                   <DialogTitle className="text-2xl">Editar Visita Comercial</DialogTitle>
                 </DialogHeader>
+
                 <div className="space-y-5 pt-4">
                   <div>
                     <Label htmlFor="edit-producto">Producto</Label>
@@ -198,6 +229,7 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
                         className="mt-2"
                       />
                     </div>
+
                     <div>
                       <Label htmlFor="edit-numeroOportunidad">Número de Oportunidad</Label>
                       <Input
@@ -221,6 +253,7 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
                         className="mt-2"
                       />
                     </div>
+
                     <div>
                       <Label htmlFor="edit-consultor">Consultor</Label>
                       <Input
@@ -245,8 +278,10 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
                         value={tiempo}
                         onChange={(e) => setTiempo(e.target.value)}
                         className="mt-2"
+                        inputMode="decimal"
                       />
                     </div>
+
                     <div>
                       <Label htmlFor="edit-fecha">Fecha</Label>
                       <Input
@@ -270,6 +305,7 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
                       value={valorOportunidad}
                       onChange={(e) => setValorOportunidad(e.target.value)}
                       className="mt-2"
+                      inputMode="decimal"
                     />
                   </div>
 
@@ -296,7 +332,10 @@ export const VisitCard = ({ visit, onDeleteVisit, onUpdateVisit }: VisitCardProp
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
                     Eliminar
                   </AlertDialogAction>
                 </AlertDialogFooter>
