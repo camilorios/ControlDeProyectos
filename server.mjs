@@ -280,6 +280,41 @@ app.get("/api/projects/:id", async (req, res) => {
   }
 });
 
+app.put("/api/projects/:id", async (req, res) => {
+  try {
+    const parsed = ProjectUpdate.parse(req.body); // <- tu esquema parcial
+    const fields = Object.keys(parsed);
+    if (fields.length === 0) {
+      return res.status(400).json({ ok: false, error: "No hay campos para actualizar." });
+    }
+
+    const values = [];
+    const sets = [];
+    let i = 1;
+    for (const f of fields) {
+      sets.push(`${f} = $${i++}`);
+      values.push(parsed[f]);
+    }
+    values.push(req.params.id);
+
+    const { rowCount } = await pool.query(
+      `UPDATE projects SET ${sets.join(", ")}, updated_at = NOW() WHERE id = $${i}`,
+      values
+    );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ ok: false, error: "Proyecto no encontrado" });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.errors) {
+      return res.status(400).json({ ok: false, error: "Datos inválidos", details: e.errors });
+    }
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error actualizando proyecto" });
+  }
+});
+
 app.post("/api/projects", async (req, res) => {
   try {
     const parsed = ProjectCreate.parse(req.body);
@@ -339,6 +374,27 @@ app.post("/api/projects", async (req, res) => {
     res.status(500).json({ ok: false, error: "Error creando proyecto" });
   }
 });
+
+app.get("/api/projects", async (req, res) => {
+  try {
+    const status = (req.query.status || "active").toString();
+    const onlyActive = status !== "archived";
+    const { rows } = await pool.query(
+      `SELECT id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
+              planned_hours, executed_hours, hourly_rate, start_date, end_date,
+              client_name, pm, finalizado, activo, fecha_creacion, updated_at
+       FROM projects
+       WHERE activo = $1
+       ORDER BY fecha_creacion DESC`,
+      [onlyActive] // true => activos; false => archivados
+    );
+    res.json({ ok: true, data: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: "Error fetching projects" });
+  }
+});
+
 
 app.put("/api/projects/:id", async (req, res) => {
   try {

@@ -1,39 +1,112 @@
 // src/lib/azureDb.ts
 import { api } from "./http";
 
-// ---------- Tipos (ajústalos si ya tienes tus propios tipos) ----------
+/**
+ * Tipos base
+ * Ajusta si tus componentes usan otros nombres.
+ */
+
+// Proyecto que devuelve el backend
 export type Project = {
   id: string;
   nombre: string;
   numero_oportunidad: string | null;
   pais: string;
   consultor: string;
-  monto_oportunidad: number;
-  terminado: boolean;
+  monto_oportunidad: number | null;
   client_name: string | null;
   pm: string | null;
   planned_hours: number | null;
   executed_hours: number | null;
   hourly_rate: number | null;
-  start_date: string | null;
-  end_date: string | null;
-  fecha_creacion: string;
+  start_date: string | null;  // 'YYYY-MM-DD'
+  end_date: string | null;    // 'YYYY-MM-DD'
+  finalizado: boolean;        // <-- nuevo nombre consistente con el server
+  activo: boolean;            // soft-delete
+  fecha_creacion: string;     // ISO
+  updated_at: string | null;  // ISO
 };
 
-export type NewProject = {
+// Payload para crear/editar.
+// Permitimos string en números porque vienen de <input /> y el server los convierte.
+export type ProjectPayload = {
   nombre: string;
-  numero_oportunidad?: string | null;
   pais: string;
   consultor: string;
-  monto_oportunidad: number;
+
+  numero_oportunidad?: string | null;
+
+  monto_oportunidad?: number | string | null;
+  planned_hours?: number | string | null;
+  executed_hours?: number | string | null;
+  hourly_rate?: number | string | null;
+
+  start_date?: string | null;   // 'YYYY-MM-DD'
+  end_date?: string | null;     // 'YYYY-MM-DD'
+
   client_name?: string | null;
   pm?: string | null;
-  planned_hours?: number | null;
-  executed_hours?: number | null;
-  hourly_rate?: number | null;
-  start_date?: string | null; // "YYYY-MM-DD"
-  end_date?: string | null;
+
+  finalizado?: boolean | string | number | null; // checkbox / select
 };
+
+// ---------- Projects API ----------
+
+/**
+ * Lista proyectos.
+ * @param status 'active' (por defecto) o 'archived'
+ * - El server acepta /api/projects?status=active|archived
+ * - Esta función devuelve siempre un array de Project.
+ */
+export async function getAllProjects(status: "active" | "archived" = "active"): Promise<Project[]> {
+  // Intentamos compatibilidad con dos formatos de respuesta:
+  //  - [ ... ]           (array directo)
+  //  - { ok, data: [ ] } (envoltorio)
+  const res = await api.get<any>(`/api/projects?status=${status}`);
+  return Array.isArray(res) ? (res as Project[]) : (res?.data as Project[] ?? []);
+}
+
+export async function createProject(payload: ProjectPayload): Promise<Project> {
+  return api.post<Project>("/api/projects", payload);
+}
+
+export async function getProjectById(id: string): Promise<Project> {
+  return api.get<Project>(`/api/projects/${id}`);
+}
+
+export async function updateProject(
+  id: string,
+  payload: Partial<ProjectPayload>
+): Promise<Project> {
+  // El server admite actualización parcial (PUT).
+  return api.put<Project>(`/api/projects/${id}`, payload);
+}
+
+/**
+ * Archiva (soft-delete) un proyecto.
+ * - Requiere que el proyecto esté `finalizado=true` (el server valida).
+ * - Se mantiene en BD con activo=false para reportes.
+ */
+export async function archiveProject(id: string): Promise<{ ok: boolean; error?: string }> {
+  return api.delete<{ ok: boolean; error?: string }>(`/api/projects/${id}`);
+}
+
+// Alias por compatibilidad con código existente que quizás usa "deleteProject".
+export const deleteProject = archiveProject;
+
+// Conveniente agrupación para importar como objeto
+export const projectsApi = {
+  getAll: getAllProjects,
+  list: getAllProjects,     // alias
+  create: createProject,
+  getById: getProjectById,
+  update: updateProject,
+  archive: archiveProject,
+  delete: deleteProject,    // alias
+  remove: deleteProject,    // alias
+};
+
+// ---------- Visits API (si tu app las usa) ----------
 
 export type Visit = {
   id: string;
@@ -43,70 +116,41 @@ export type Visit = {
   pais: string | null;
   consultor: string | null;
   hora: string | null;
-  fecha: string | null;
+  fecha: string | null;            // 'YYYY-MM-DD'
   monto_oportunidad: number | null;
   activo: boolean;
-  fecha_creacion: string;
+  fecha_creacion: string;          // ISO
 };
 
-export type NewVisit = Omit<Visit, "id" | "fecha_creacion" | "activo"> & {
-  activo?: boolean;
+export type VisitPayload = {
+  producto?: string | null;
+  client_name?: string | null;
+  numero_oportunidad?: string | null;
+  pais?: string | null;
+  consultor?: string | null;
+  hora?: string | null;
+  fecha?: string | null;                 // 'YYYY-MM-DD'
+  monto_oportunidad?: number | string | null;
 };
 
-// ---------- Funciones REST contra /api ----------
-// PROJECTS
-export async function getAllProjects(): Promise<Project[]> {
-  return api.get<Project[]>("/api/projects");
-}
-export async function createProject(body: NewProject): Promise<Project> {
-  return api.post<Project>("/api/projects", body);
-}
-export async function getProjectById(id: string): Promise<Project> {
-  return api.get<Project>(`/api/projects/${id}`);
-}
-export async function updateProject(
-  id: string,
-  body: Partial<NewProject> & { terminado?: boolean }
-): Promise<Project> {
-  return api.put<Project>(`/api/projects/${id}`, body);
-}
-export async function deleteProject(id: string): Promise<{ ok: true }> {
-  return api.del<{ ok: true }>(`/api/projects/${id}`);
+export async function getAllVisits(status: "active" | "archived" = "active"): Promise<Visit[]> {
+  const res = await api.get<any>(`/api/visits?status=${status}`);
+  return Array.isArray(res) ? (res as Visit[]) : (res?.data as Visit[] ?? []);
 }
 
-// VISITS
-export async function getAllVisits(): Promise<Visit[]> {
-  return api.get<Visit[]>("/api/visits");
-}
-export async function createVisit(body: NewVisit): Promise<Visit> {
-  return api.post<Visit>("/api/visits", body);
-}
-export async function deleteVisit(id: string): Promise<{ ok: true }> {
-  return api.del<{ ok: true }>(`/api/visits/${id}`);
+export async function createVisit(payload: VisitPayload): Promise<Visit> {
+  return api.post<Visit>("/api/visits", payload);
 }
 
-// ---------- OBJETOS de compatibilidad (lo que piden los componentes) ----------
-// Muchos componentes importaban { projectsApi } desde '@/lib/azureDb'.
-// Exportamos un objeto con los nombres "típicos" para no romper nada.
-export const projectsApi = {
-  // listas
-  getAll: getAllProjects,
-  list: getAllProjects,      // alias
-  // lectura
-  getOne: getProjectById,
-  getById: getProjectById,   // alias
-  // escritura
-  create: createProject,
-  update: updateProject,
-  delete: deleteProject,
-  remove: deleteProject      // alias
-};
+export async function deleteVisit(id: string): Promise<{ ok: boolean; error?: string }> {
+  // Misma semántica de soft-delete (activo=false)
+  return api.delete<{ ok: boolean; error?: string }>(`/api/visits/${id}`);
+}
 
-// Y lo mismo para visitas si hay componentes que lo usen así:
 export const visitsApi = {
   getAll: getAllVisits,
-  list: getAllVisits,        // alias
+  list: getAllVisits,  // alias
   create: createVisit,
   delete: deleteVisit,
-  remove: deleteVisit        // alias
+  remove: deleteVisit, // alias
 };

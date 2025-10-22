@@ -52,7 +52,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
   const [isOpen, setIsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [hoursToAdd, setHoursToAdd] = useState("");
-
+  
   // Edit form states
   const [editName, setEditName] = useState(project.name);
   const [editDescription, setEditDescription] = useState(project.description);
@@ -80,17 +80,17 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
   const totalDuration = end.getTime() - start.getTime();
   const elapsed = now.getTime() - start.getTime();
   const timeProgress = Math.min(Math.max((elapsed / totalDuration) * 100, 0), 100);
-
+  
   const getProjectStatus = () => {
     if (now < start) {
       return { label: "Pendiente", variant: "secondary" as const, icon: Clock };
     }
     if (now > end) {
-      return progress >= 100
+      return progress >= 100 
         ? { label: "Completado", variant: "default" as const, icon: TrendingUp }
         : { label: "Retrasado", variant: "destructive" as const, icon: AlertCircle };
     }
-
+    
     // Project is in progress
     if (progress < timeProgress - 10) {
       return { label: "Atrasado", variant: "destructive" as const, icon: AlertCircle };
@@ -104,27 +104,19 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
   const status = getProjectStatus();
   const StatusIcon = status.icon;
 
-  const handleAddHours = async () => {
+  const handleAddHours = () => {
     const hours = parseFloat(hoursToAdd);
     if (isNaN(hours) || hours <= 0) {
       toast.error("Por favor ingrese un número válido de horas");
       return;
     }
-
-    try {
-      // si existe en el SDK, persiste en BD; si no, no falla
-      await projectsApi.addHours?.(project.id, hours);
-      onUpdateHours(project.id, hours);
-      setHoursToAdd("");
-      setIsOpen(false);
-      toast.success(`${hours} horas agregadas al proyecto`);
-    } catch (e) {
-      console.error(e);
-      toast.error("No se pudieron registrar las horas");
-    }
+    onUpdateHours(project.id, hours);
+    setHoursToAdd("");
+    setIsOpen(false);
+    toast.success(`${hours} horas agregadas al proyecto`);
   };
 
-  const handleEditProject = async () => {
+  const handleEditProject = () => {
     const hours = parseFloat(editPlannedHours);
     if (isNaN(hours) || hours <= 0) {
       toast.error("Por favor ingrese horas planificadas válidas");
@@ -153,7 +145,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
       return;
     }
 
-    const payload: Partial<Project> = {
+    onUpdateProject(project.id, {
       name: editName.trim(),
       description: editDescription.trim(),
       plannedHours: hours,
@@ -166,34 +158,15 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
       country: editCountry.trim(),
       hourlyRate: rate,
       terminado: editTerminado,
-    };
+    });
 
-    try {
-      await projectsApi.update(project.id, payload);
-      onUpdateProject(project.id, payload);
-      setIsEditOpen(false);
-      toast.success("Proyecto actualizado exitosamente");
-    } catch (e) {
-      console.error(e);
-      toast.error("No se pudo actualizar el proyecto");
-    }
+    setIsEditOpen(false);
+    toast.success("Proyecto actualizado exitosamente");
   };
 
-  const handleDelete = async () => {
-    // Regla: sólo se puede archivar si está finalizado
-    if (!project.terminado && !editTerminado) {
-      toast.error("Para archivar el proyecto primero debes marcarlo como Finalizado.");
-      return;
-    }
-
-    try {
-      await projectsApi.archive(project.id); // soft-delete (is_archived = true)
-      onDeleteProject(project.id); // lo quita del portal
-      toast.success("Proyecto archivado");
-    } catch (e) {
-      console.error(e);
-      toast.error("No se pudo archivar el proyecto");
-    }
+  const handleDelete = () => {
+    onDeleteProject(project.id);
+    toast.success("Proyecto eliminado");
   };
 
   const handleAddObservacion = async () => {
@@ -222,7 +195,7 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
       setNewObservacion("");
       toast.success("Observación agregada");
     } catch (error) {
-      console.error("Error agregando observación:", error);
+      console.error('Error agregando observación:', error);
       toast.error("No se pudo agregar la observación");
     }
   };
@@ -250,31 +223,31 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
               {project.numeroOportunidad && (
                 <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">Oportunidad:</span>
+                  <span className="text-muted-foreground">Oportunidad:</span> 
                   <span className="font-medium">{project.numeroOportunidad}</span>
                 </div>
               )}
               {project.clientName && (
                 <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">Cliente:</span>
+                  <span className="text-muted-foreground">Cliente:</span> 
                   <span className="font-medium">{project.clientName}</span>
                 </div>
               )}
               {project.country && (
                 <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">País:</span>
+                  <span className="text-muted-foreground">País:</span> 
                   <span className="font-medium">{project.country}</span>
                 </div>
               )}
               {project.consultant && (
                 <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">Consultor:</span>
+                  <span className="text-muted-foreground">Consultor:</span> 
                   <span className="font-medium">{project.consultant}</span>
                 </div>
               )}
               {project.pm && (
                 <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">PM:</span>
+                  <span className="text-muted-foreground">PM:</span> 
                   <span className="font-medium">{project.pm}</span>
                 </div>
               )}
@@ -293,11 +266,11 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
           <div className="flex items-center gap-6 px-6 border-l border-border">
             <div className="flex flex-col items-center justify-center min-w-[120px]">
               <Progress value={Math.min(progress, 100)} className="h-2 w-24 mb-2" />
-              <span className={`text-sm font-semibold ${isOverBudget ? "text-warning" : "text-success"}`}>
+              <span className={`text-sm font-semibold ${isOverBudget ? 'text-warning' : 'text-success'}`}>
                 {project.executedHours} / {project.plannedHours} hrs
               </span>
             </div>
-
+            
             <div className="flex items-center gap-2">
               <div className="p-2 rounded-lg bg-primary/10">
                 <Clock className="w-4 h-4 text-primary" />
@@ -350,21 +323,17 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                 <AlertDialogHeader>
                   <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Esta acción archivará el proyecto (no se elimina de la base de datos). Solo se puede archivar si el proyecto está marcado como Finalizado.
+                    Esta acción no se puede deshacer. Esto eliminará permanentemente el proyecto.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDelete}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    Archivar
+                  <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Eliminar
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" variant="outline" className="shadow-sm">
@@ -379,7 +348,12 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                 <div className="space-y-4 pt-4">
                   <div>
                     <Label htmlFor="edit-name">Nombre del Proyecto</Label>
-                    <Input id="edit-name" value={editName} onChange={(e) => setEditName(e.target.value)} className="mt-2" />
+                    <Input
+                      id="edit-name"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="mt-2"
+                    />
                   </div>
                   <div>
                     <Label htmlFor="edit-description">Descripción</Label>
@@ -393,21 +367,41 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="edit-client">Cliente</Label>
-                      <Input id="edit-client" value={editClientName} onChange={(e) => setEditClientName(e.target.value)} className="mt-2" />
+                      <Input
+                        id="edit-client"
+                        value={editClientName}
+                        onChange={(e) => setEditClientName(e.target.value)}
+                        className="mt-2"
+                      />
                     </div>
                     <div>
                       <Label htmlFor="edit-country">País</Label>
-                      <Input id="edit-country" value={editCountry} onChange={(e) => setEditCountry(e.target.value)} className="mt-2" />
+                      <Input
+                        id="edit-country"
+                        value={editCountry}
+                        onChange={(e) => setEditCountry(e.target.value)}
+                        className="mt-2"
+                      />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="edit-consultant">Consultor</Label>
-                      <Input id="edit-consultant" value={editConsultant} onChange={(e) => setEditConsultant(e.target.value)} className="mt-2" />
+                      <Input
+                        id="edit-consultant"
+                        value={editConsultant}
+                        onChange={(e) => setEditConsultant(e.target.value)}
+                        className="mt-2"
+                      />
                     </div>
                     <div>
                       <Label htmlFor="edit-pm">PM</Label>
-                      <Input id="edit-pm" value={editPm} onChange={(e) => setEditPm(e.target.value)} className="mt-2" />
+                      <Input
+                        id="edit-pm"
+                        value={editPm}
+                        onChange={(e) => setEditPm(e.target.value)}
+                        className="mt-2"
+                      />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -451,31 +445,50 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="edit-start">Fecha de Inicio</Label>
-                      <Input id="edit-start" type="date" value={editStartDate} onChange={(e) => setEditStartDate(e.target.value)} className="mt-2" />
+                      <Input
+                        id="edit-start"
+                        type="date"
+                        value={editStartDate}
+                        onChange={(e) => setEditStartDate(e.target.value)}
+                        className="mt-2"
+                      />
                     </div>
                     <div>
                       <Label htmlFor="edit-end">Fecha de Fin</Label>
-                      <Input id="edit-end" type="date" value={editEndDate} onChange={(e) => setEditEndDate(e.target.value)} className="mt-2" />
+                      <Input
+                        id="edit-end"
+                        type="date"
+                        value={editEndDate}
+                        onChange={(e) => setEditEndDate(e.target.value)}
+                        className="mt-2"
+                      />
                     </div>
                   </div>
 
                   <div className="border-t pt-4 mt-4">
                     <div className="flex items-center justify-between mb-4">
                       <Label htmlFor="terminado">Marcar como Finalizado</Label>
-                      <Switch id="terminado" checked={editTerminado} onCheckedChange={setEditTerminado} />
+                      <Switch
+                        id="terminado"
+                        checked={editTerminado}
+                        onCheckedChange={setEditTerminado}
+                      />
                     </div>
                   </div>
 
                   <div className="border-t pt-4 mt-4">
                     <Label className="mb-3 block">Observaciones</Label>
-
+                    
                     {project.observaciones.length > 0 && (
                       <div className="space-y-2 mb-4 max-h-[200px] overflow-y-auto">
                         {project.observaciones.map((obs) => (
                           <div key={obs.id} className="p-3 bg-muted rounded-lg">
                             <p className="text-sm text-foreground mb-1">{obs.text}</p>
                             <p className="text-xs text-muted-foreground">
-                              {new Date(obs.date).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}
+                              {new Date(obs.date).toLocaleString('es-ES', {
+                                dateStyle: 'short',
+                                timeStyle: 'short'
+                              })}
                             </p>
                           </div>
                         ))}
@@ -489,7 +502,11 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                         onChange={(e) => setNewObservacion(e.target.value)}
                         className="min-h-[80px]"
                       />
-                      <Button onClick={handleAddObservacion} size="sm" className="shrink-0">
+                      <Button 
+                        onClick={handleAddObservacion} 
+                        size="sm"
+                        className="shrink-0"
+                      >
                         <MessageSquare className="w-4 h-4" />
                       </Button>
                     </div>
@@ -501,38 +518,37 @@ export const ProjectCard = ({ project, onUpdateHours, onUpdateProject, onDeleteP
                 </div>
               </DialogContent>
             </Dialog>
-
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="bg-gradient-primary shadow-sm hover:shadow-glow">
-                  <Plus className="w-4 h-4 mr-1" />
-                  Horas
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Registrar Horas</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-4">
-                  <div>
-                    <Label htmlFor="hours">Horas trabajadas</Label>
-                    <Input
-                      id="hours"
-                      type="number"
-                      step="0.5"
-                      min="0"
-                      placeholder="0.0"
-                      value={hoursToAdd}
-                      onChange={(e) => setHoursToAdd(e.target.value)}
-                      className="mt-2"
-                    />
-                  </div>
-                  <Button onClick={handleAddHours} className="w-full bg-gradient-primary">
-                    Agregar Horas
-                  </Button>
+            <DialogTrigger asChild>
+              <Button size="sm" className="bg-gradient-primary shadow-sm hover:shadow-glow">
+                <Plus className="w-4 h-4 mr-1" />
+                Horas
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Registrar Horas</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                <div>
+                  <Label htmlFor="hours">Horas trabajadas</Label>
+                  <Input
+                    id="hours"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="0.0"
+                    value={hoursToAdd}
+                    onChange={(e) => setHoursToAdd(e.target.value)}
+                    className="mt-2"
+                  />
                 </div>
-              </DialogContent>
-            </Dialog>
+                <Button onClick={handleAddHours} className="w-full bg-gradient-primary">
+                  Agregar Horas
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
           </div>
         </div>
       </div>
