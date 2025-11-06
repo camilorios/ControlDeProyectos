@@ -105,7 +105,9 @@ function normalizeProjectPayload(raw = {}) {
 
     // flags y notas
     terminado: raw.terminado ?? raw.finalizado ?? false,
-    observaciones: raw.observaciones ?? null,
+
+    // 🔧 FIX: nunca mandar NULL; usa cadena vacía si no viene nada
+    observaciones: raw.observaciones ?? "",
   };
 }
 
@@ -210,7 +212,7 @@ app.post("/api/projects", async (req, res) => {
         p.start_date,
         p.end_date,
         p.terminado,
-        p.observaciones,
+        p.observaciones, // ahora nunca es null
       ]
     );
     res.status(201).json(rows[0]);
@@ -256,7 +258,7 @@ app.put("/api/projects/:id", async (req, res) => {
         p.start_date,
         p.end_date,
         p.terminado,
-        p.observaciones,
+        p.observaciones, // idem
         req.params.id,
       ]
     );
