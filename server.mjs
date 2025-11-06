@@ -273,7 +273,12 @@ app.post("/api/visits", async (req, res) => {
 // ---------------- FRONTEND BUILD ----------------
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
-app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
+
+// ✅ Compatible con Express 5 (SPA catch-all)
+app.get(/^(?!\/api\/).*/, (req, res, next) => {
+  if (req.method !== "GET") return next();
+  res.sendFile(path.join(distPath, "index.html"));
+});
 
 // ---------------- INICIO ----------------
 const port = process.env.PORT || 8080;
