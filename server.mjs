@@ -120,8 +120,8 @@ const zDateOpt = z
     .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Formato de fecha YYYY-MM-DD" })
     .nullable())
   .optional();
-  
-  // Acepta "", null, undefined, NaN, "nan" y cae al valor por defecto (0)
+
+// Acepta "", null, undefined, NaN, "nan" y cae al valor por defecto (0)
 const zNumberOrDefault = (def = 0) =>
   z.preprocess((v) => {
     if (v === null || v === undefined) return def;
@@ -143,7 +143,7 @@ const ProjectCreate = z.object({
   pais: z.string().min(1, "pais es requerido"),
   consultor: z.string().min(1, "consultor es requerido"),
 
-  // NUEVO: acepta "", null, NaN, "nan" y los convierte a 0; valida >= 0
+  // acepta "", null, NaN, "nan" -> 0; valida >= 0
   monto_oportunidad: zNumberOrDefault(0).refine((n) => n >= 0, {
     message: "monto_oportunidad debe ser >= 0",
   }),
@@ -234,7 +234,7 @@ app.use(express.json());
 // Health simple
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// Health DB: prueba SELECT 1 y muestra de dónde leyó la cadena
+// Health DB
 app.get("/api/health/db", async (_req, res) => {
   try {
     const r = await pool.query("SELECT 1 as ok");
@@ -277,41 +277,6 @@ app.get("/api/projects/:id", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: "Error obteniendo proyecto" });
-  }
-});
-
-app.put("/api/projects/:id", async (req, res) => {
-  try {
-    const parsed = ProjectUpdate.parse(req.body); // <- tu esquema parcial
-    const fields = Object.keys(parsed);
-    if (fields.length === 0) {
-      return res.status(400).json({ ok: false, error: "No hay campos para actualizar." });
-    }
-
-    const values = [];
-    const sets = [];
-    let i = 1;
-    for (const f of fields) {
-      sets.push(`${f} = $${i++}`);
-      values.push(parsed[f]);
-    }
-    values.push(req.params.id);
-
-    const { rowCount } = await pool.query(
-      `UPDATE projects SET ${sets.join(", ")}, updated_at = NOW() WHERE id = $${i}`,
-      values
-    );
-
-    if (rowCount === 0) {
-      return res.status(404).json({ ok: false, error: "Proyecto no encontrado" });
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    if (e.errors) {
-      return res.status(400).json({ ok: false, error: "Datos inválidos", details: e.errors });
-    }
-    console.error(e);
-    res.status(500).json({ ok: false, error: "Error actualizando proyecto" });
   }
 });
 
@@ -375,90 +340,77 @@ app.post("/api/projects", async (req, res) => {
   }
 });
 
-app.get("/api/projects", async (req, res) => {
-  try {
-    const status = (req.query.status || "active").toString();
-    const onlyActive = status !== "archived";
-    const { rows } = await pool.query(
-      `SELECT id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad,
-              planned_hours, executed_hours, hourly_rate, start_date, end_date,
-              client_name, pm, finalizado, activo, fecha_creacion, updated_at
-       FROM projects
-       WHERE activo = $1
-       ORDER BY fecha_creacion DESC`,
-      [onlyActive] // true => activos; false => archivados
-    );
-    res.json({ ok: true, data: rows });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: "Error fetching projects" });
-  }
-});
-
-
+// ✅ PUT corregido: un solo try/catch; sin bloques anidados
 app.put("/api/projects/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const {
+    nombre,
+    pais,
+    consultor,
+    monto_oportunidad,
+    numero_oportunidad,
+    client_name,
+    pm,
+    planned_hours,
+    executed_hours,
+    hourly_rate,
+    start_date,
+    end_date,
+    terminado,        // <-- usado en la BD
+    observaciones     // <-- si tu tabla lo tiene
+  } = req.body ?? {};
+
   try {
-    const data = ProjectUpdate.parse(req.body);
-
-    const allowed = [
-      "nombre",
-      "numero_oportunidad",
-      "pais",
-      "consultor",
-      "monto_oportunidad",
-      "client_name",
-      "pm",
-      "planned_hours",
-      "executed_hours",
-      "hourly_rate",
-      "start_date",
-      "end_date",
-      "terminado",
-    ];
-
-    const sets = [];
-    const values = [];
-    let i = 1;
-
-    for (const key of allowed) {
-      if (Object.prototype.hasOwnProperty.call(data, key)) {
-        sets.push(`${key} = $${i++}`);
-        values.push(data[key]);
-      }
-    }
-
-    if (sets.length === 0) {
-      return res.status(400).json({ ok: false, error: "Nada para actualizar" });
-    }
-
-    values.push(req.params.id);
-    const { rows } = await pool.query(
-      `UPDATE projects SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
-      values
+    const result = await pool.query(
+      `
+      UPDATE projects
+      SET
+        nombre             = COALESCE($1, nombre),
+        pais               = COALESCE($2, pais),
+        consultor          = COALESCE($3, consultor),
+        monto_oportunidad  = COALESCE($4, monto_oportunidad),
+        numero_oportunidad = COALESCE($5, numero_oportunidad),
+        client_name        = COALESCE($6, client_name),
+        pm                 = COALESCE($7, pm),
+        planned_hours      = COALESCE($8, planned_hours),
+        executed_hours     = COALESCE($9, executed_hours),
+        hourly_rate        = COALESCE($10, hourly_rate),
+        start_date         = COALESCE($11, start_date),
+        end_date           = COALESCE($12, end_date),
+        terminado          = COALESCE($13, terminado),
+        observaciones      = COALESCE($14, observaciones),
+        updated_at         = NOW()
+      WHERE id = $15
+      RETURNING *;
+      `,
+      [
+        nombre,
+        pais,
+        consultor,
+        monto_oportunidad,
+        numero_oportunidad,
+        client_name,
+        pm,
+        planned_hours,
+        executed_hours,
+        hourly_rate,
+        start_date,
+        end_date,
+        terminado,
+        observaciones,
+        id
+      ]
     );
 
-    if (!rows[0]) return res.status(404).json({ ok: false, error: "No encontrado" });
-    res.json({ ok: true, project: rows[0] });
-  } catch (e) {
-    if (e?.name === "ZodError") {
-      console.error("Validation error:", e.issues);
-      return res
-        .status(400)
-        .json({ ok: false, error: "Datos inválidos", details: e.issues });
+    if (result.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: "Proyecto no encontrado" });
     }
-    console.error(e);
-    res.status(500).json({ ok: false, error: "Error actualizando proyecto" });
-  }
-});
 
-app.delete("/api/projects/:id", async (req, res) => {
-  try {
-    const r = await pool.query(`DELETE FROM projects WHERE id = $1`, [req.params.id]);
-    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "No encontrado" });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: "Error eliminando proyecto" });
+    return res.json({ ok: true, project: result.rows[0] });
+  } catch (error) {
+    console.error("PUT /api/projects/:id error ->", error);
+    return res.status(500).json({ ok: false, error: "Error interno del servidor", detalle: error.message });
   }
 });
 

@@ -22,6 +22,10 @@ function numOrNull(v: any) {
   return Number.isFinite(n) ? n : null;
 }
 
+const { data: project } = useQuery(['project', projectId], () =>
+  projectsApi.getProject(projectId)
+);
+
 export default function ProjectEditDialog({ project, open, onClose, onSaved }: Props) {
   const [form, setForm] = useState<Partial<ProjectPayload & { id?: string }>>({});
   const [loading, setLoading] = useState(false);
