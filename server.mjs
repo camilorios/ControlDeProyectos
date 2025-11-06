@@ -58,18 +58,52 @@ function normalizeProjectPayload(raw = {}) {
     return v;
   };
   return {
+    // nombres
     nombre: raw.nombre ?? raw.project_name ?? null,
-    numero_oportunidad: raw.numero_oportunidad ?? raw.opportunity_number ?? null,
+
+    // oportunidad (snake ES, camel ES, EN)
+    numero_oportunidad:
+      raw.numero_oportunidad ??
+      raw.numeroOportunidad ??
+      raw.opportunity_number ??
+      null,
+
+    // país / consultor (ES / EN)
     pais: raw.pais ?? raw.country ?? null,
     consultor: raw.consultor ?? raw.consultant ?? null,
-    client_name: raw.client_name ?? raw.cliente ?? raw.nombre_cliente ?? null,
-    pm: raw.pm ?? raw.pm_asignado ?? null,
-    planned_hours: toNumOrNull(raw.planned_hours ?? raw.horas_planificadas),
-    executed_hours: toNumOrNull(raw.executed_hours ?? raw.horas_ejecutadas),
-    hourly_rate: toNumOrNull(raw.hourly_rate ?? raw.valor_hora),
-    monto_oportunidad: toNumOrNull(raw.monto_oportunidad ?? raw.monto),
-    start_date: toIsoDateOrNull(raw.start_date ?? raw.fecha_inicio),
-    end_date: toIsoDateOrNull(raw.end_date ?? raw.fecha_fin),
+
+    // cliente y PM (múltiples variantes)
+    client_name:
+      raw.client_name ??
+      raw.cliente ??
+      raw.nombre_cliente ??
+      raw.nombreCliente ??
+      null,
+    pm: raw.pm ?? raw.pm_asignado ?? raw.pmAsignado ?? null,
+
+    // métricas (snake ES, camel ES, EN)
+    planned_hours:
+      toNumOrNull(
+        raw.planned_hours ?? raw.horas_planificadas ?? raw.horasPlanificadas
+      ),
+    executed_hours:
+      toNumOrNull(
+        raw.executed_hours ?? raw.horas_ejecutadas ?? raw.horasEjecutadas
+      ),
+    hourly_rate:
+      toNumOrNull(raw.hourly_rate ?? raw.valor_hora ?? raw.valorHora),
+
+    // monto oportunidad (snake ES, camel ES, genérico)
+    monto_oportunidad:
+      toNumOrNull(
+        raw.monto_oportunidad ?? raw.montoOportunidad ?? raw.monto
+      ),
+
+    // fechas (snake ES, camel ES, EN ISO)
+    start_date: toIsoDateOrNull(raw.start_date ?? raw.fecha_inicio ?? raw.fechaInicio),
+    end_date:   toIsoDateOrNull(raw.end_date   ?? raw.fecha_fin    ?? raw.fechaFin),
+
+    // flags y notas
     terminado: raw.terminado ?? raw.finalizado ?? false,
     observaciones: raw.observaciones ?? null,
   };
