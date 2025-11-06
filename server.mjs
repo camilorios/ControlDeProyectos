@@ -42,6 +42,21 @@ function buildPgConfig() {
 const pgConfig = buildPgConfig();
 const pool = new Pool(pgConfig);
 
+// Fija el search_path a public para toda la sesión
+await (async () => {
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`SET search_path TO public`);
+      console.log("search_path fijado a 'public'");
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    console.error("No se pudo fijar search_path:", e.message);
+  }
+})();
+
 // ---------------- NORMALIZADOR DE PAYLOAD ----------------
 function normalizeProjectPayload(raw = {}) {
   const toNumOrNull = (v) => {
@@ -106,15 +121,18 @@ function normalizeProjectPayload(raw = {}) {
     // flags y notas
     terminado: raw.terminado ?? raw.finalizado ?? false,
 
-    // 🔧 FIX: nunca mandar NULL; usa cadena vacía si no viene nada
+    // nunca null
     observaciones: raw.observaciones ?? "",
+    // activo opcional por si el front lo envía
+    activo: typeof raw.activo === "boolean" ? raw.activo : null,
   };
 }
 
-// ---------------- CREACIÓN DE TABLAS ----------------
+// ---------------- MIGRACIONES / CREACIÓN DE TABLAS ----------------
 async function ensureTables() {
+  // Crea si no existen (UUID id + columnas principales)
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS projects (
+    CREATE TABLE IF NOT EXISTS public.projects (
       id UUID PRIMARY KEY,
       nombre TEXT NOT NULL,
       numero_oportunidad TEXT,
@@ -129,14 +147,32 @@ async function ensureTables() {
       start_date DATE,
       end_date DATE,
       terminado BOOLEAN DEFAULT false,
-      observaciones TEXT,
+      observaciones TEXT DEFAULT '',
+      activo BOOLEAN DEFAULT true,
       fecha_creacion TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
 
+  // Alinea columnas si la tabla existía de antes
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS visits (
+    ALTER TABLE public.projects
+      ADD COLUMN IF NOT EXISTS client_name       TEXT,
+      ADD COLUMN IF NOT EXISTS pm                TEXT,
+      ADD COLUMN IF NOT EXISTS planned_hours     NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS executed_hours    NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS hourly_rate       NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS start_date        DATE,
+      ADD COLUMN IF NOT EXISTS end_date          DATE,
+      ADD COLUMN IF NOT EXISTS terminado         BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS observaciones     TEXT DEFAULT '',
+      ADD COLUMN IF NOT EXISTS activo            BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS fecha_creacion    TIMESTAMPTZ DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ DEFAULT NOW();
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.visits (
       id UUID PRIMARY KEY,
       producto TEXT,
       client_name TEXT,
@@ -166,19 +202,45 @@ app.get("/api/health/db", async (_req, res) => {
   }
 });
 
-// --- PROJECTS ---
-app.get("/api/projects", async (_req, res) => {
+// --- DEBUG ---
+app.get("/api/debug/projects/count", async (_req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM projects ORDER BY fecha_creacion DESC");
+    const r = await pool.query("SELECT COUNT(*)::int AS c FROM public.projects");
+    res.json({ count: r.rows[0].c });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.get("/api/debug/projects", async (_req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM public.projects ORDER BY fecha_creacion DESC LIMIT 10");
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- PROJECTS ---
+app.get("/api/projects", async (req, res) => {
+  try {
+    const status = (req.query.status || "").toString().toLowerCase();
+    let sql = "SELECT * FROM public.projects";
+    const params = [];
+    if (status === "active") {
+      sql += " WHERE activo = TRUE AND (terminado = FALSE OR terminado IS NULL)";
+    }
+    sql += " ORDER BY fecha_creacion DESC";
+    const { rows } = await pool.query(sql, params);
     res.json(rows);
   } catch (e) {
+    console.error("GET /api/projects", e);
     res.status(500).json({ error: e.message });
   }
 });
 
 app.get("/api/projects/:id", async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
+    const { rows } = await pool.query("SELECT * FROM public.projects WHERE id = $1", [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: "No encontrado" });
     res.json(rows[0]);
   } catch (e) {
@@ -191,11 +253,11 @@ app.post("/api/projects", async (req, res) => {
     const p = normalizeProjectPayload(req.body);
     const id = uuidv4();
     const { rows } = await pool.query(
-      `INSERT INTO projects 
+      `INSERT INTO public.projects 
        (id, nombre, numero_oportunidad, pais, consultor, monto_oportunidad, 
         client_name, pm, planned_hours, executed_hours, hourly_rate, 
-        start_date, end_date, terminado, observaciones)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        start_date, end_date, terminado, observaciones, activo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         id,
@@ -212,13 +274,14 @@ app.post("/api/projects", async (req, res) => {
         p.start_date,
         p.end_date,
         p.terminado,
-        p.observaciones, // ahora nunca es null
+        p.observaciones ?? "",
+        p.activo ?? true,
       ]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
     console.error("POST /api/projects", e);
-    res.status(500).json({ error: "Error creando proyecto" });
+    res.status(500).json({ error: "Error creando proyecto", detail: e.message });
   }
 });
 
@@ -226,23 +289,24 @@ app.put("/api/projects/:id", async (req, res) => {
   try {
     const p = normalizeProjectPayload(req.body);
     const result = await pool.query(
-      `UPDATE projects SET
-        nombre = COALESCE($1, nombre),
+      `UPDATE public.projects SET
+        nombre             = COALESCE($1, nombre),
         numero_oportunidad = COALESCE($2, numero_oportunidad),
-        pais = COALESCE($3, pais),
-        consultor = COALESCE($4, consultor),
-        monto_oportunidad = COALESCE($5, monto_oportunidad),
-        client_name = COALESCE($6, client_name),
-        pm = COALESCE($7, pm),
-        planned_hours = COALESCE($8, planned_hours),
-        executed_hours = COALESCE($9, executed_hours),
-        hourly_rate = COALESCE($10, hourly_rate),
-        start_date = COALESCE($11, start_date),
-        end_date = COALESCE($12, end_date),
-        terminado = COALESCE($13, terminado),
-        observaciones = COALESCE($14, observaciones),
-        updated_at = NOW()
-      WHERE id = $15
+        pais               = COALESCE($3, pais),
+        consultor          = COALESCE($4, consultor),
+        monto_oportunidad  = COALESCE($5, monto_oportunidad),
+        client_name        = COALESCE($6, client_name),
+        pm                 = COALESCE($7, pm),
+        planned_hours      = COALESCE($8, planned_hours),
+        executed_hours     = COALESCE($9, executed_hours),
+        hourly_rate        = COALESCE($10, hourly_rate),
+        start_date         = COALESCE($11, start_date),
+        end_date           = COALESCE($12, end_date),
+        terminado          = COALESCE($13, terminado),
+        observaciones      = COALESCE($14, observaciones),
+        activo             = COALESCE($15, activo),
+        updated_at         = NOW()
+      WHERE id = $16
       RETURNING *`,
       [
         p.nombre,
@@ -258,7 +322,8 @@ app.put("/api/projects/:id", async (req, res) => {
         p.start_date,
         p.end_date,
         p.terminado,
-        p.observaciones, // idem
+        p.observaciones ?? "",
+        typeof p.activo === "boolean" ? p.activo : null,
         req.params.id,
       ]
     );
@@ -273,7 +338,7 @@ app.put("/api/projects/:id", async (req, res) => {
 // --- VISITS ---
 app.get("/api/visits", async (_req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM visits WHERE activo = true ORDER BY fecha_creacion DESC");
+    const { rows } = await pool.query("SELECT * FROM public.visits WHERE activo = TRUE ORDER BY fecha_creacion DESC");
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -285,7 +350,7 @@ app.post("/api/visits", async (req, res) => {
     const id = uuidv4();
     const v = req.body;
     const { rows } = await pool.query(
-      `INSERT INTO visits (id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad)
+      `INSERT INTO public.visits (id, producto, client_name, numero_oportunidad, pais, consultor, hora, fecha, monto_oportunidad)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [
@@ -310,7 +375,7 @@ app.post("/api/visits", async (req, res) => {
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
-// ✅ Compatible con Express 5 (SPA catch-all)
+// Compatible con Express 5 (SPA catch-all)
 app.get(/^(?!\/api\/).*/, (req, res, next) => {
   if (req.method !== "GET") return next();
   res.sendFile(path.join(distPath, "index.html"));
