@@ -220,23 +220,60 @@ app.get("/api/debug/projects", async (_req, res) => {
   }
 });
 
-// --- PROJECTS ---
-app.get("/api/projects", async (req, res) => {
+// LISTAR PROYECTOS (con soporte para ?status=active)
+app.get('/api/projects', async (req, res) => {
   try {
-    const status = (req.query.status || "").toString().toLowerCase();
-    let sql = "SELECT * FROM public.projects";
-    const params = [];
-    if (status === "active") {
-      sql += " WHERE activo = TRUE AND (terminado = FALSE OR terminado IS NULL)";
+    const { status } = req.query;
+
+    const baseSelect = `
+      SELECT
+        id,
+        nombre,
+        numero_oportunidad,
+        COALESCE(pais, '')               AS pais,
+        COALESCE(consultor, '')          AS consultor,
+        COALESCE(pm, '')                 AS pm,
+        COALESCE(client_name, '')        AS client_name,
+        COALESCE(monto_oportunidad, 0)::numeric AS monto_oportunidad,
+        COALESCE(planned_hours, 0)::numeric     AS planned_hours,
+        COALESCE(executed_hours, 0)::numeric    AS executed_hours,
+        COALESCE(hourly_rate, 0)::numeric       AS hourly_rate,
+        COALESCE(terminado, false)       AS terminado,
+        COALESCE(activo, true)           AS activo,
+        start_date,
+        end_date,
+        created_at,
+        updated_at
+      FROM public.projects
+    `;
+
+    let rows;
+    if (status === 'active') {
+      const sql = `
+        ${baseSelect}
+        WHERE COALESCE(activo, true) = true
+          AND COALESCE(terminado, false) = false
+        ORDER BY created_at DESC
+      `;
+      rows = (await pool.query(sql)).rows;
+    } else {
+      const sql = `${baseSelect} ORDER BY created_at DESC`;
+      rows = (await pool.query(sql)).rows;
     }
-    sql += " ORDER BY fecha_creacion DESC";
-    const { rows } = await pool.query(sql, params);
+
     res.json(rows);
-  } catch (e) {
-    console.error("GET /api/projects", e);
-    res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error('GET /api/projects error', err);
+    res.status(500).json({ error: 'Error listando proyectos' });
   }
 });
+
+// (Opcional) Alias por si el front alguna vez llama /api/projects/status=active
+app.get('/api/projects/status=:status', (req, res, next) => {
+  req.query.status = req.params.status;
+  next();
+}, app._router.stack.find(r => r.route && r.route.path === '/api/projects').route.stack[0].handle);
+
 
 app.get("/api/projects/:id", async (req, res) => {
   try {
